@@ -1,12 +1,28 @@
-from fastapi import FastAPI, HTTPException
+import logging
+import os
+import re
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import os
-import re
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Logging replaces all print() statements. If the app crashes mid-demo,
+# bhavishya.log shows exactly where the data dropped
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bhavishya.log", encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger("bhavishya")
 
 from core.darpan import run_darpan
 from core.simulator import run_simulator
@@ -26,7 +42,9 @@ from core.memory import (
 from core.language import detect_language
 from core.careers import get_careers_for_identity
 
-app = FastAPI(title="Bhavishya API", version="1.0.0")
+# App & CORS
+
+app = FastAPI(title="Bhavishya API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,22 +54,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Username validation
+# Validation helpers
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
 
 
-def validate_username(username: str):
+def validate_username(username: str) -> None:
     if not USERNAME_RE.match(username):
         raise HTTPException(
             status_code=400,
-            detail="Username must be 3-20 characters, letters/numbers/underscore only.",
+            detail="Username must be 3–20 characters: letters, numbers, or underscore only.",
         )
 
 
-def validate_pin(pin: str):
+def validate_pin(pin: str) -> None:
     if not pin.isdigit() or len(pin) != 4:
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
+
+
+# Dependency — reusable student loader (replaces repeated load_student calls)
+
+
+def get_or_create_student(name: str, grade: int, uid: str) -> dict:
+    """FastAPI Depends()-compatible loader. Always returns a valid profile."""
+    profile = load_student(name, grade, uid)
+    if not profile:
+        profile = create_new_profile(name, grade, uid)
+    return profile
 
 
 # Request models
@@ -59,8 +88,8 @@ def validate_pin(pin: str):
 
 class RegisterRequest(BaseModel):
     username: str
-    pin: str  # 4 digits
-    name: str  # display name
+    pin: str
+    name: str
     grade: int
 
 
@@ -114,19 +143,25 @@ class AawazChatRequest(BaseModel):
     language: Optional[str] = "hinglish"
 
 
+# Routers
+
+auth_router = APIRouter(prefix="", tags=["auth"])
+aawaz_router = APIRouter(prefix="/aawaz", tags=["aawaz"])
+core_router = APIRouter(prefix="", tags=["core"])
+
 # Health
 
 
-@app.get("/health")
-def health():
+@app.get("/health", tags=["meta"])
+async def health():
     return {"status": "ok", "model": os.getenv("BHAVISHYA_MODE", "cloud")}
 
 
-# Auth: Register
+# Auth routes
 
 
-@app.post("/register")
-def register(req: RegisterRequest):
+@auth_router.post("/register")
+async def register(req: RegisterRequest):
     validate_username(req.username)
     validate_pin(req.pin)
 
@@ -146,6 +181,7 @@ def register(req: RegisterRequest):
         pin=req.pin,
     )
     save_student(profile)
+    logger.info(f"New student registered: {req.username} (grade {req.grade})")
 
     return {
         "username": profile["username"],
@@ -159,11 +195,8 @@ def register(req: RegisterRequest):
     }
 
 
-# Auth: Login
-
-
-@app.post("/login")
-def login(req: LoginRequest):
+@auth_router.post("/login")
+async def login(req: LoginRequest):
     validate_username(req.username)
     validate_pin(req.pin)
 
@@ -178,8 +211,10 @@ def login(req: LoginRequest):
         )
 
     if not verify_pin(req.pin, profile["pin_hash"]):
+        logger.warning(f"Failed login attempt for username: {req.username}")
         raise HTTPException(status_code=401, detail="Wrong PIN.")
 
+    logger.info(f"Student logged in: {req.username}")
     return {
         "username": profile["username"],
         "name": profile["name"],
@@ -191,10 +226,10 @@ def login(req: LoginRequest):
         "has_futures": bool(profile.get("futures_generated")),
     }
 
-# Legacy Onboard (kept for backward compat)
 
-@app.post("/onboard")
-def onboard(req: OnboardRequest):
+@auth_router.post("/onboard")
+async def onboard(req: OnboardRequest):
+    """Legacy onboard flow — kept for backward compatibility."""
     profile = load_student(req.name, req.grade, req.uid)
     is_returning = profile is not None
 
@@ -212,14 +247,23 @@ def onboard(req: OnboardRequest):
         "uid": req.uid,
     }
 
-# Aawaz: transcribe
 
-@app.post("/aawaz/transcribe")
-def aawaz_transcribe(req: AawazTranscribeRequest):
+# Aawaz routes
+
+
+@aawaz_router.post("/transcribe")
+async def aawaz_transcribe(req: AawazTranscribeRequest):
     if not req.audio_b64 and not req.image_b64 and not req.text_fallback:
         raise HTTPException(status_code=400, detail="No input provided.")
+
+    logger.info(
+        f"[AAWAZ/TRANSCRIBE] {req.name} | "
+        f"audio={'yes' if req.audio_b64 else 'no'} "
+        f"image={'yes' if req.image_b64 else 'no'}"
+    )
+
     try:
-        result = run_aawaz_transcribe(
+        result = await run_aawaz_transcribe(
             audio_b64=req.audio_b64,
             audio_mime=req.audio_mime or "audio/webm",
             image_b64=req.image_b64,
@@ -229,21 +273,23 @@ def aawaz_transcribe(req: AawazTranscribeRequest):
             name=req.name,
         )
     except RuntimeError as e:
+        logger.error(f"[AAWAZ/TRANSCRIBE] RuntimeError: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
     return result
 
-# Aawaz: chat
 
-@app.post("/aawaz/chat")
-def aawaz_chat(req: AawazChatRequest):
-    profile = load_student(req.name, req.grade, req.uid)
-    if not profile:
-        profile = create_new_profile(req.name, req.grade, req.uid)
-
+@aawaz_router.post("/chat")
+async def aawaz_chat(req: AawazChatRequest):
+    profile = get_or_create_student(req.name, req.grade, req.uid)
     history = profile.get("aawaz_history", [])
 
+    logger.info(
+        f"[AAWAZ/CHAT] {req.name} | exchange #{len([m for m in history if m['role'] == 'user']) + 1} | lang={req.language}"
+    )
+
     try:
-        response = run_aawaz_chat(
+        response = await run_aawaz_chat(
             message=req.message,
             history=history,
             grade=req.grade,
@@ -251,7 +297,11 @@ def aawaz_chat(req: AawazChatRequest):
             language=req.language or "hinglish",
         )
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"[AAWAZ/CHAT] Both cloud and Ollama failed for {req.name}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="AI is temporarily unavailable (cloud + offline both unreachable). Please try again in a moment.",
+        )
 
     history.append({"role": "user", "content": req.message})
     history.append({"role": "aawaz", "content": response})
@@ -271,18 +321,22 @@ def aawaz_chat(req: AawazChatRequest):
         "exchange_count": len([m for m in history if m["role"] == "user"]),
     }
 
-# Session
 
-@app.post("/session")
-def run_session(req: SessionRequest):
-    profile = load_student(req.name, req.grade, req.uid)
-    if not profile:
-        profile = create_new_profile(req.name, req.grade, req.uid)
+# Core routes
 
+
+@core_router.post("/session")
+async def run_session(req: SessionRequest):
+    profile = get_or_create_student(req.name, req.grade, req.uid)
     previous_identity = profile.get("identity_current") or None
-    identity = run_darpan(req.student_input, req.grade, previous_identity)
 
+    logger.info(
+        f"[SESSION] {req.name} | session #{profile.get('session_count', 0) + 1}"
+    )
+
+    identity = run_darpan(req.student_input, req.grade, previous_identity)
     if "error" in identity:
+        logger.error(f"[SESSION/DARPAN] Failed for {req.name}: {identity['error']}")
         raise HTTPException(
             status_code=500, detail=f"Darpan failed: {identity['error']}"
         )
@@ -306,10 +360,9 @@ def run_session(req: SessionRequest):
         ),
     }
 
-# Simulate
 
-@app.post("/simulate")
-def simulate(req: SimulateRequest):
+@core_router.post("/simulate")
+async def simulate(req: SimulateRequest):
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
@@ -318,7 +371,7 @@ def simulate(req: SimulateRequest):
 
     if profile.get("session_count", 0) < 2:
         raise HTTPException(
-            status_code=400, detail="Futures only available after 2 sessions."
+            status_code=400, detail="Futures only unlock after 2 sessions."
         )
 
     identity = profile["identity_current"]
@@ -331,6 +384,7 @@ def simulate(req: SimulateRequest):
     )
 
     if "error" in futures:
+        logger.error(f"[SIMULATE] Simulator failed for {req.name}: {futures['error']}")
         raise HTTPException(
             status_code=500, detail=f"Simulator failed: {futures['error']}"
         )
@@ -343,10 +397,9 @@ def simulate(req: SimulateRequest):
     save_student(profile)
     return futures
 
-# Chat
 
-@app.post("/chat")
-def chat(req: ChatRequest):
+@core_router.post("/chat")
+async def chat(req: ChatRequest):
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
@@ -368,11 +421,17 @@ def chat(req: ChatRequest):
 
     return {"response": response, "language_detected": language}
 
-# Profile
 
-@app.get("/profile/{name}/{grade}/{uid}")
-def get_profile(name: str, grade: int, uid: str):
+@app.get("/profile/{name}/{grade}/{uid}", tags=["meta"])
+async def get_profile(name: str, grade: int, uid: str):
     profile = load_student(name, grade, uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Student not found.")
     return profile
+
+
+# Register routers
+
+app.include_router(auth_router)
+app.include_router(aawaz_router)
+app.include_router(core_router)
