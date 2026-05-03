@@ -18,7 +18,7 @@ def _load_system_prompt() -> str:
         return f.read()
 
 
-def run_aawaz_transcribe(
+async def run_aawaz_transcribe(
     audio_b64: str | None,
     audio_mime: str,
     image_b64: str | None,
@@ -28,8 +28,9 @@ def run_aawaz_transcribe(
     name: str,
 ) -> dict:
     """
-    Multimodal intake: audio + optional image → transcript + marksheet_data.
-    Gracefully falls back - never crashes caller.
+    Multimodal intake: audio + optional image → transcript + marksheet_data + image_description.
+    Returns image_description for ALL image uploads (not just marksheets).
+    Gracefully falls back and never crashes caller.
     Note: transcription is cloud-only (multimodal). Ollama 2b can't do this.
     """
     if not audio_b64 and not image_b64:
@@ -37,6 +38,7 @@ def run_aawaz_transcribe(
         return {
             "transcript": text,
             "marksheet_data": None,
+            "image_description": None,
             "combined_input": text,
             "mode": "text",
         }
@@ -51,15 +53,18 @@ def run_aawaz_transcribe(
     if audio_b64:
         instructions.append(
             f"This is audio from {name}, a Class {grade} Indian student. "
-            "Transcribe exactly what they said. Keep original language. "
+            "Transcribe exactly what they said. Keep original language (Hindi/English/Hinglish). "
             "Output under the label: TRANSCRIPT:"
         )
     if image_b64:
         instructions.append(
-            "This image is a marksheet or document. "
-            "Extract subject-wise marks: Subject: marks/total (one per line). "
-            "Also extract class, school, year if visible. "
-            "Output under the label: MARKSHEET:"
+            "Analyse this image carefully.\n"
+            "1. If it is a marksheet or report card: extract subject-wise marks as "
+            "'Subject: marks/total' (one per line), and the class, school, year if visible. "
+            "Output under the label: MARKSHEET:\n"
+            "2. Regardless of what the image is, also write a brief 1-2 sentence plain-English "
+            "description of what you see — a hobby drawing, a certificate, a photo, etc. "
+            "Output under the label: IMAGE_DESCRIPTION:"
         )
     parts.append({"text": "\n\n".join(instructions)})
 
@@ -71,12 +76,12 @@ def run_aawaz_transcribe(
         )
         raw = response.text.strip()
     except Exception as e:
-        # Transcription has no offline fallback so return text_fallback gracefully
         print(f"[AAWAZ/TRANSCRIBE] Cloud failed ({e}) — returning text fallback")
         fallback = text_fallback or ""
         return {
             "transcript": fallback,
             "marksheet_data": None,
+            "image_description": None,
             "combined_input": fallback,
             "mode": "fallback",
             "error": str(e),
@@ -84,24 +89,43 @@ def run_aawaz_transcribe(
 
     transcript = ""
     marksheet_data = None
+    image_description = None
 
+    # Parse TRANSCRIPT
     if "TRANSCRIPT:" in raw:
         t_start = raw.index("TRANSCRIPT:") + len("TRANSCRIPT:")
-        t_end = raw.index("MARKSHEET:") if "MARKSHEET:" in raw else len(raw)
+        # end at next label or EOF
+        next_labels = []
+        for label in ("MARKSHEET:", "IMAGE_DESCRIPTION:"):
+            if label in raw:
+                next_labels.append(raw.index(label))
+        t_end = min(next_labels) if next_labels else len(raw)
         transcript = raw[t_start:t_end].strip()
     elif not image_b64:
         transcript = raw
 
+    # Parse MARKSHEET
     if "MARKSHEET:" in raw:
         m_start = raw.index("MARKSHEET:") + len("MARKSHEET:")
-        marksheet_data = raw[m_start:].strip() or None
+        m_end = (
+            raw.index("IMAGE_DESCRIPTION:") if "IMAGE_DESCRIPTION:" in raw else len(raw)
+        )
+        marksheet_data = raw[m_start:m_end].strip() or None
 
+    # Parse IMAGE_DESCRIPTION
+    if "IMAGE_DESCRIPTION:" in raw:
+        d_start = raw.index("IMAGE_DESCRIPTION:") + len("IMAGE_DESCRIPTION:")
+        image_description = raw[d_start:].strip() or None
+
+    # For image-only (no audio), transcript comes from text_fallback
     if image_b64 and not audio_b64:
         transcript = text_fallback or ""
 
     combined = transcript
     if marksheet_data:
         combined = f"{transcript}\n\n[Marksheet:\n{marksheet_data}]".strip()
+    elif image_description:
+        combined = f"{transcript}\n\n[Image: {image_description}]".strip()
 
     mode = (
         "voice+image"
@@ -112,12 +136,13 @@ def run_aawaz_transcribe(
     return {
         "transcript": transcript,
         "marksheet_data": marksheet_data,
+        "image_description": image_description,
         "combined_input": combined,
         "mode": mode,
     }
 
 
-def run_aawaz_chat(
+async def run_aawaz_chat(
     message: str,
     history: list,
     grade: int,
@@ -130,17 +155,28 @@ def run_aawaz_chat(
     """
     base_prompt = _load_system_prompt()
     lang_instruction = (
-        "\n\nIMPORTANT: The student has chosen ENGLISH mode. Reply entirely in clear, warm English."
+        "\n\nIMPORTANT: The student has chosen ENGLISH mode. "
+        "Reply entirely in clear, warm English."
         if language == "english"
-        else "\n\nIMPORTANT: The student has chosen HINGLISH mode. Mix Hindi and English naturally - like an older sibling. Write in Roman script (no Devanagari), keep it warm and conversational."
+        else "\n\nIMPORTANT: The student has chosen HINGLISH mode. "
+        "Mix Hindi and English naturally — like an older sibling. "
+        "Write in Roman script (no Devanagari), keep it warm and conversational."
     )
-    system_prompt = base_prompt + lang_instruction
+    # Strict speak-tag rule injected at runtime so it always overrides
+    speak_rule = (
+        "\n\nCRITICAL OUTPUT RULE: Your text response must NEVER contain <speak>, </speak>, "
+        "or any XML/SSML tags. The frontend handles TTS separately. "
+        "Write your response as plain conversational text only."
+    )
+    system_prompt = base_prompt + lang_instruction + speak_rule
+
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
 
+    # Build Gemini-format contents, explicitly mapping roles
     contents = []
     for msg in history:
-        role = "user" if msg["role"] == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        gemini_role = "user" if msg["role"] == "user" else "model"
+        contents.append({"role": gemini_role, "parts": [{"text": msg["content"]}]})
     contents.append(
         {
             "role": "user",
@@ -160,6 +196,7 @@ def run_aawaz_chat(
         except Exception as e:
             print(f"[AAWAZ/CLOUD] Failed ({e}) ~ falling back to Ollama")
 
+    # Ollama fallback same explicit role mapping
     try:
         ollama_msgs = [{"role": "system", "content": system_prompt}]
         for msg in history:
@@ -178,8 +215,10 @@ def run_aawaz_chat(
         response = ollama.chat(model=OFFLINE_MODEL, messages=ollama_msgs)
         return response["message"]["content"].strip()
     except Exception as e2:
-        raise RuntimeError(f"Aawaz chat failed (cloud + ollama): {e2}")
+        raise RuntimeError(f"Aawaz chat failed (cloud + ollama both down): {e2}")
 
+
+# Darpan readiness heuristic
 
 _SUBSTANCE_RE = re.compile(
     r"love|hate|passion|interest|hobby|khelna|banana|banata|banati|padhna|likhna"
