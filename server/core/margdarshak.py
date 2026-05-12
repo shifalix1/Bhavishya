@@ -7,6 +7,36 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+_CLOUD_MODEL = "gemma-4-26b-a4b-it"
+_OLLAMA_MODEL = "gemma4:e4b"
+
+_PROMPT_CACHE: str | None = None
+_GEMINI_CLIENT: genai.Client | None = None
+
+# Compiled once at module load - not per call.
+_HEAVY_SIGNAL_RE = re.compile(
+    r"fear|contradict|pressure|sacrifice|cost|honest|hard truth|worry|concern"
+    r"|tension|gap|conflict|struggle|difficult|painful",
+    re.IGNORECASE,
+)
+
+
+def _load_prompt() -> str:
+    global _PROMPT_CACHE
+    if _PROMPT_CACHE is None:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base, "prompts", "margdarshak_prompt.txt")
+        with open(path, encoding="utf-8") as f:
+            _PROMPT_CACHE = f.read()
+    return _PROMPT_CACHE
+
+
+def _get_client() -> genai.Client:
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    return _GEMINI_CLIENT
+
 
 def run_margdarshak(
     question: str,
@@ -19,28 +49,21 @@ def run_margdarshak(
 ) -> tuple[str, bool]:
     """
     Returns (response_text, is_fallback).
-    is_fallback is True only when both cloud and Ollama fail and a canned string is returned.
-    The caller should surface is_fallback to the frontend for demo transparency.
+    is_fallback is True only when both cloud and Ollama fail.
+    Caller surfaces is_fallback to the frontend for demo transparency.
     """
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    prompt_path = os.path.join(BASE_DIR, "prompts", "margdarshak_prompt.txt")
-
-    with open(prompt_path, encoding="utf-8") as f:
-        base_prompt = f.read()
+    base_prompt = _load_prompt()
 
     # Prevent structural labels from leaking into output.
-    # The prompt uses headers to describe internal process, not response format.
     behavior_addendum = (
         "\n\nIMPORTANT TONE NOTE: Do NOT use structural headers or numbered labels "
         "like 'VALIDATE FIRST' or 'GAME PLAN' in your actual response. "
         "Those describe your internal process, not your output format. "
         "Write as a single flowing conversation - warm, direct, one idea at a time."
     )
-
     system_prompt = base_prompt + behavior_addendum
 
-    # Determine whether this is Margdarshak's first response in this conversation.
-    # Used by the prompt's FIRST RESPONSE IDENTITY REVEAL instruction.
+    # IS_FIRST_RESPONSE drives the identity reveal in the prompt.
     is_first_response = not any(m.get("role") == "bhavishya" for m in history)
 
     context_lines = [
@@ -51,31 +74,26 @@ def run_margdarshak(
         f"Last 5 messages: {json.dumps(history, ensure_ascii=False)}",
     ]
 
-    # Pass Darpan's confidence score so Margdarshak knows how hard to lean on the identity.
-    # Low confidence: ask, don't assert. High confidence: speak with conviction.
+    # Low confidence: Darpan had thin signal - ask, don't assert.
+    # High confidence: Darpan had rich signal - speak with conviction.
     confidence = identity_json.get("identity_confidence", 5)
     if confidence <= 4:
         context_lines.append(
-            f"\nIdentity confidence is LOW ({confidence}/10): Darpan had limited signal. "
+            f"\nIdentity confidence is LOW ({confidence}/10): limited signal from this student. "
             "Do not make strong claims about who they are. Ask questions instead of stating conclusions. "
             "Treat the identity JSON as a working hypothesis, not a diagnosis."
         )
     elif confidence >= 8:
         context_lines.append(
-            f"\nIdentity confidence is HIGH ({confidence}/10): Darpan had rich signal. "
+            f"\nIdentity confidence is HIGH ({confidence}/10): rich, specific signal. "
             "You can reference identity traits with conviction. This is a solid picture."
         )
 
-    # If the previous Margdarshak message was heavy (fear, pressure, sacrifice named),
-    # instruct a lighter follow-up. Deep observations need breathing room after them.
+    # If the previous response went deep (fear/pressure/sacrifice named),
+    # the next one should be warmer. Observations need breathing room after them.
     last_bhavishya = next(
         (m["content"] for m in reversed(history) if m.get("role") == "bhavishya"),
         None,
-    )
-    _HEAVY_SIGNAL_RE = re.compile(
-        r"fear|contradict|pressure|sacrifice|cost|honest|hard truth|worry|concern"
-        r"|tension|gap|conflict|struggle|difficult|painful",
-        re.IGNORECASE,
     )
     if last_bhavishya and _HEAVY_SIGNAL_RE.search(last_bhavishya):
         context_lines.append(
@@ -83,9 +101,9 @@ def run_margdarshak(
             "This one should be warmer and lighter. One idea, gently. Intelligence needs breathing room."
         )
 
-    # Inject at most one of (micro_observation, identity_callback) per response.
-    # Surfacing both in one message makes Bhavishya feel like it is showing off.
-    # Prefer callback for returning students where longitudinal memory is the stronger signal.
+    # Surface at most one signal per response.
+    # Stacking both makes Bhavishya feel like it is showing off.
+    # Prefer callback for returning students where longitudinal memory is stronger.
     if identity_callback and micro_observation:
         micro_observation = None
 
@@ -100,11 +118,10 @@ def run_margdarshak(
         context_lines.append(
             f"\nMemory callback (returning student): {identity_callback}\n"
             "Weave this in once, like a sibling who genuinely remembers. "
-            "Not a data readout. Casual and imprecise, the way real memory works."
+            "Casual and imprecise, the way real memory works. Not a data readout."
         )
 
-    # Inject slim career data for grounding specific answers.
-    # Only honest_reality, parent_frame, and ai_disruption are needed here.
+    # Slim career data: only honest_reality, parent_frame, ai_disruption.
     if career_data:
         career_context = []
         for c in career_data[:3]:
@@ -124,21 +141,22 @@ def run_margdarshak(
         )
 
     user_msg = "\n".join(context_lines)
-
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
 
     try:
         if mode == "cloud":
-            client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-            response = client.models.generate_content(
-                model="gemma-4-26b-a4b-it",
+            response = _get_client().models.generate_content(
+                model=_CLOUD_MODEL,
                 contents=user_msg,
-                config={"system_instruction": system_prompt},
+                config={
+                    "system_instruction": system_prompt,
+                    "http_options": {"timeout": 25000},
+                },
             )
             return response.text.strip(), False
         else:
             response = ollama.chat(
-                model="gemma4:e4b",
+                model=_OLLAMA_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
@@ -147,7 +165,7 @@ def run_margdarshak(
             return response["message"]["content"].strip(), False
 
     except Exception as e:
-        print(f"[{mode.upper()} MODE] Margdarshak error: {e}")
+        print(f"[MARGDARSHAK/{mode.upper()}] Error: {e}")
         if language == "english":
             fallback = "Give me a second to think about that. What you're asking matters - let's go slow."
         else:
