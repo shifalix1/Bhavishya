@@ -2,7 +2,7 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -11,12 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Logging replaces all print() statements. If the app crashes mid-demo,
-# bhavishya.log shows exactly where the data dropped
-
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler("bhavishya.log", encoding="utf-8"),
@@ -27,7 +24,12 @@ logger = logging.getLogger("bhavishya")
 from core.darpan import run_darpan
 from core.simulator import run_simulator
 from core.margdarshak import run_margdarshak
-from core.aawaz import run_aawaz_transcribe, run_aawaz_chat, is_ready_for_darpan
+from core.aawaz import (
+    run_aawaz_transcribe,
+    run_aawaz_chat,
+    is_ready_for_darpan,
+    extract_micro_observations,
+)
 from core.memory import (
     load_student,
     load_by_username,
@@ -38,13 +40,15 @@ from core.memory import (
     username_exists,
     verify_pin,
     hash_pin,
+    add_micro_observation,
+    get_latest_observation,
+    get_identity_delta,
+    get_identity_callback,
 )
 from core.language import detect_language
 from core.careers import get_careers_for_identity
 
-# App & CORS
-
-app = FastAPI(title="Bhavishya API", version="2.0.0")
+app = FastAPI(title="Bhavishya API", version="2.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,7 +67,7 @@ def validate_username(username: str) -> None:
     if not USERNAME_RE.match(username):
         raise HTTPException(
             status_code=400,
-            detail="Username must be 3–20 characters: letters, numbers, or underscore only.",
+            detail="Username must be 3-20 characters: letters, numbers, or underscore only.",
         )
 
 
@@ -72,11 +76,7 @@ def validate_pin(pin: str) -> None:
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
 
 
-# Dependency — reusable student loader (replaces repeated load_student calls)
-
-
 def get_or_create_student(name: str, grade: int, uid: str) -> dict:
-    """FastAPI Depends()-compatible loader. Always returns a valid profile."""
     profile = load_student(name, grade, uid)
     if not profile:
         profile = create_new_profile(name, grade, uid)
@@ -140,7 +140,7 @@ class AawazChatRequest(BaseModel):
     grade: int
     uid: str
     message: str
-    language: Optional[str] = "hinglish"
+    language: Optional[str] = "english"
 
 
 # Routers
@@ -149,12 +149,14 @@ auth_router = APIRouter(prefix="", tags=["auth"])
 aawaz_router = APIRouter(prefix="/aawaz", tags=["aawaz"])
 core_router = APIRouter(prefix="", tags=["core"])
 
-# Health
-
 
 @app.get("/health", tags=["meta"])
 async def health():
-    return {"status": "ok", "model": os.getenv("BHAVISHYA_MODE", "cloud")}
+    return {
+        "status": "ok",
+        "model": os.getenv("BHAVISHYA_MODE", "cloud"),
+        "version": "2.1.0",
+    }
 
 
 # Auth routes
@@ -229,7 +231,7 @@ async def login(req: LoginRequest):
 
 @auth_router.post("/onboard")
 async def onboard(req: OnboardRequest):
-    """Legacy onboard flow — kept for backward compatibility."""
+    """Legacy onboard flow - kept for backward compatibility."""
     profile = load_student(req.name, req.grade, req.uid)
     is_returning = profile is not None
 
@@ -285,7 +287,9 @@ async def aawaz_chat(req: AawazChatRequest):
     history = profile.get("aawaz_history", [])
 
     logger.info(
-        f"[AAWAZ/CHAT] {req.name} | exchange #{len([m for m in history if m['role'] == 'user']) + 1} | lang={req.language}"
+        f"[AAWAZ/CHAT] {req.name} | "
+        f"exchange #{len([m for m in history if m['role'] == 'user']) + 1} | "
+        f"lang={req.language}"
     )
 
     try:
@@ -300,12 +304,18 @@ async def aawaz_chat(req: AawazChatRequest):
         logger.error(f"[AAWAZ/CHAT] Both cloud and Ollama failed for {req.name}: {e}")
         raise HTTPException(
             status_code=503,
-            detail="AI is temporarily unavailable (cloud + offline both unreachable). Please try again in a moment.",
+            detail="AI is temporarily unavailable. Please try again in a moment.",
         )
 
     history.append({"role": "user", "content": req.message})
     history.append({"role": "aawaz", "content": response})
     profile["aawaz_history"] = history
+
+    # Extract micro-observations and store the latest one
+    observations = extract_micro_observations(history)
+    for obs in observations:
+        profile = add_micro_observation(profile, obs)
+
     save_student(profile)
 
     ready = is_ready_for_darpan(history)
@@ -319,6 +329,7 @@ async def aawaz_chat(req: AawazChatRequest):
         "ready_for_darpan": ready,
         "combined_input": combined_input,
         "exchange_count": len([m for m in history if m["role"] == "user"]),
+        "micro_observation": get_latest_observation(profile),
     }
 
 
@@ -334,14 +345,28 @@ async def run_session(req: SessionRequest):
         f"[SESSION] {req.name} | session #{profile.get('session_count', 0) + 1}"
     )
 
-    identity = run_darpan(req.student_input, req.grade, previous_identity)
-    if "error" in identity:
-        logger.error(f"[SESSION/DARPAN] Failed for {req.name}: {identity['error']}")
-        raise HTTPException(
-            status_code=500, detail=f"Darpan failed: {identity['error']}"
+    # Enrich student_input with behavioral signals from Aawaz if available
+    # Darpan gets the raw text + any micro-observations already extracted
+    enriched_input = req.student_input
+    obs = profile.get("micro_observations", [])
+    if obs:
+        recent_obs = [o["text"] for o in obs[-3:]]
+        enriched_input += (
+            "\n\n[Behavioral signals observed during conversation: "
+            + " | ".join(recent_obs)
+            + "]"
         )
 
+    identity = run_darpan(enriched_input, req.grade, previous_identity)
+
+    # Identity delta - compare to previous session if it exists
+    delta = (
+        get_identity_delta(previous_identity, identity) if previous_identity else None
+    )
+
     profile["identity_current"] = identity
+    if "identity_history" not in profile:
+        profile["identity_history"] = []
     profile["identity_history"].append(
         {"session": profile["session_count"] + 1, "snapshot": identity}
     )
@@ -352,7 +377,8 @@ async def run_session(req: SessionRequest):
     return {
         "identity": identity,
         "session_count": profile["session_count"],
-        "should_simulate": profile["session_count"] >= 2,
+        "delta": delta,
+        "should_simulate": True,  # Unlocked for demo - no session gate
         "message": (
             "First session done. Come back soon."
             if profile["session_count"] == 1
@@ -364,38 +390,39 @@ async def run_session(req: SessionRequest):
 @core_router.post("/simulate")
 async def simulate(req: SimulateRequest):
     profile = load_student(req.name, req.grade, req.uid)
-    if not profile or not profile.get("identity_current"):
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student not found.")
+
+    if not profile.get("identity_current"):
         raise HTTPException(
             status_code=400, detail="No identity found. Run /session first."
         )
 
-    if profile.get("session_count", 0) < 2:
-        raise HTTPException(
-            status_code=400, detail="Futures only unlock after 2 sessions."
-        )
-
     identity = profile["identity_current"]
     career_data = get_careers_for_identity(identity, n=5)
+
+    logger.info(f"[SIMULATE] {req.name} | session #{profile.get('session_count', 0)}")
+
     futures = run_simulator(
         identity_json=identity,
         grade=profile["grade"],
-        session_count=profile["session_count"],
+        session_count=profile.get("session_count", 1),
         career_data=career_data,
     )
-
-    if "error" in futures:
-        logger.error(f"[SIMULATE] Simulator failed for {req.name}: {futures['error']}")
-        raise HTTPException(
-            status_code=500, detail=f"Simulator failed: {futures['error']}"
-        )
 
     if "futures_generated" not in profile:
         profile["futures_generated"] = []
     profile["futures_generated"].append(
-        {"session": profile["session_count"], "futures": futures.get("futures", [])}
+        {
+            "session": profile.get("session_count", 1),
+            "futures": futures.get("futures", []),
+        }
     )
     save_student(profile)
-    return futures
+
+    # Add fallback flag to response so frontend can optionally show a subtle indicator
+    is_fallback = futures.get("_fallback", False)
+    return {**futures, "is_fallback": is_fallback}
 
 
 @core_router.post("/chat")
@@ -408,18 +435,48 @@ async def chat(req: ChatRequest):
 
     language = detect_language(req.question)
     history = get_last_n_messages(profile, n=5)
+
+    # Delayed recognition: observations and callbacks only surface every 3rd chat message.
+    # Immediate pattern recognition reads as AI. Humans put things together after a pause.
+    bhavishya_turns = sum(
+        1
+        for m in profile.get("conversation_history", [])
+        if m.get("role") == "bhavishya"
+    )
+    allow_observation = bhavishya_turns % 3 == 2  # fires on turns 3, 6, 9...
+
+    micro_obs = get_latest_observation(profile) if allow_observation else None
+    callback = get_identity_callback(profile) if allow_observation else None
+
+    # Fetch top 3 career matches - gives Margdarshak real grounding for specific questions
+    # Slim fields only (honest_reality, ai_disruption, parent_frame) - not the full object
+    career_data = get_careers_for_identity(profile["identity_current"], n=3)
+
+    logger.info(
+        f"[CHAT] {req.name} | lang={language} | "
+        f"has_callback={'yes' if callback else 'no'} | "
+        f"has_observation={'yes' if micro_obs else 'no'}"
+    )
+
     response = run_margdarshak(
         question=req.question,
         identity_json=profile["identity_current"],
         history=history,
         language=language,
+        micro_observation=micro_obs,
+        identity_callback=callback,
+        career_data=career_data,
     )
 
     profile = add_message(profile, "user", req.question)
     profile = add_message(profile, "bhavishya", response)
     save_student(profile)
 
-    return {"response": response, "language_detected": language}
+    return {
+        "response": response,
+        "language_detected": language,
+        "had_callback": callback is not None,
+    }
 
 
 @app.get("/profile/{name}/{grade}/{uid}", tags=["meta"])
@@ -430,7 +487,14 @@ async def get_profile(name: str, grade: int, uid: str):
     return profile
 
 
-# Register routers
+@app.get("/profile/u/{username}", tags=["meta"])
+async def get_profile_by_username(username: str):
+    """Direct profile fetch by username - used by frontend after login."""
+    profile = load_by_username(username)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    return profile
+
 
 app.include_router(auth_router)
 app.include_router(aawaz_router)
