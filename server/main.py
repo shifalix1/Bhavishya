@@ -48,7 +48,7 @@ from core.memory import (
 from core.language import detect_language
 from core.careers import get_careers_for_identity
 
-app = FastAPI(title="Bhavishya API", version="2.1.0")
+app = FastAPI(title="Bhavishya API", version="2.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,8 +57,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Validation helpers
 
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
 
@@ -141,6 +139,10 @@ class AawazChatRequest(BaseModel):
     uid: str
     message: str
     language: Optional[str] = "english"
+    # Anomalies extracted from an uploaded image by /aawaz/transcribe.
+    # Frontend sends this once on the first chat turn after an image upload.
+    # Backend persists it so subsequent turns don't need to re-send it.
+    image_anomalies: Optional[str] = None
 
 
 # Routers
@@ -155,7 +157,7 @@ async def health():
     return {
         "status": "ok",
         "model": os.getenv("BHAVISHYA_MODE", "cloud"),
-        "version": "2.1.0",
+        "version": "2.2.0",
     }
 
 
@@ -231,7 +233,7 @@ async def login(req: LoginRequest):
 
 @auth_router.post("/onboard")
 async def onboard(req: OnboardRequest):
-    """Legacy onboard flow - kept for backward compatibility."""
+    """Legacy onboard flow kept for backward compatibility."""
     profile = load_student(req.name, req.grade, req.uid)
     is_returning = profile is not None
 
@@ -292,6 +294,14 @@ async def aawaz_chat(req: AawazChatRequest):
         f"lang={req.language}"
     )
 
+    # Use freshly sent anomalies if present, otherwise read from profile.
+    # Frontend only needs to send image_anomalies once; we persist and replay it.
+    image_anomalies = req.image_anomalies
+    if image_anomalies:
+        profile["image_anomalies"] = image_anomalies
+    elif profile.get("image_anomalies"):
+        image_anomalies = profile["image_anomalies"]
+
     try:
         response = await run_aawaz_chat(
             message=req.message,
@@ -299,6 +309,7 @@ async def aawaz_chat(req: AawazChatRequest):
             grade=req.grade,
             name=req.name,
             language=req.language or "hinglish",
+            image_anomalies=image_anomalies,
         )
     except RuntimeError as e:
         logger.error(f"[AAWAZ/CHAT] Both cloud and Ollama failed for {req.name}: {e}")
@@ -311,7 +322,6 @@ async def aawaz_chat(req: AawazChatRequest):
     history.append({"role": "aawaz", "content": response})
     profile["aawaz_history"] = history
 
-    # Extract micro-observations and store the latest one
     observations = extract_micro_observations(history)
     for obs in observations:
         profile = add_micro_observation(profile, obs)
@@ -345,8 +355,8 @@ async def run_session(req: SessionRequest):
         f"[SESSION] {req.name} | session #{profile.get('session_count', 0) + 1}"
     )
 
-    # Enrich student_input with behavioral signals from Aawaz if available
-    # Darpan gets the raw text + any micro-observations already extracted
+    # Enrich Darpan's input with behavioral signals observed during onboarding.
+    # Darpan sees the pattern evidence alongside the raw text, which raises confidence.
     enriched_input = req.student_input
     obs = profile.get("micro_observations", [])
     if obs:
@@ -359,7 +369,6 @@ async def run_session(req: SessionRequest):
 
     identity = run_darpan(enriched_input, req.grade, previous_identity)
 
-    # Identity delta - compare to previous session if it exists
     delta = (
         get_identity_delta(previous_identity, identity) if previous_identity else None
     )
@@ -378,7 +387,7 @@ async def run_session(req: SessionRequest):
         "identity": identity,
         "session_count": profile["session_count"],
         "delta": delta,
-        "should_simulate": True,  # Unlocked for demo - no session gate
+        "should_simulate": True,
         "message": (
             "First session done. Come back soon."
             if profile["session_count"] == 1
@@ -420,7 +429,6 @@ async def simulate(req: SimulateRequest):
     )
     save_student(profile)
 
-    # Add fallback flag to response so frontend can optionally show a subtle indicator
     is_fallback = futures.get("_fallback", False)
     return {**futures, "is_fallback": is_fallback}
 
@@ -436,29 +444,34 @@ async def chat(req: ChatRequest):
     language = detect_language(req.question)
     history = get_last_n_messages(profile, n=5)
 
-    # Delayed recognition: observations and callbacks only surface every 3rd chat message.
-    # Immediate pattern recognition reads as AI. Humans put things together after a pause.
     bhavishya_turns = sum(
         1
         for m in profile.get("conversation_history", [])
         if m.get("role") == "bhavishya"
     )
-    allow_observation = bhavishya_turns % 3 == 2  # fires on turns 3, 6, 9...
 
-    micro_obs = get_latest_observation(profile) if allow_observation else None
-    callback = get_identity_callback(profile) if allow_observation else None
+    # Delayed signal pacing: surface observations and callbacks every 3rd turn.
+    # Instant pattern recognition reads as AI. A beat of delay reads as human.
+    # Exception: returning students (session_count > 1) get the callback on their
+    # very first chat message so longitudinal memory fires the moment they re-enter.
+    is_returning_first_chat = (
+        profile.get("session_count", 0) > 1 and bhavishya_turns == 0
+    )
+    allow_signals = is_returning_first_chat or (bhavishya_turns % 3 == 2)
 
-    # Fetch top 3 career matches - gives Margdarshak real grounding for specific questions
-    # Slim fields only (honest_reality, ai_disruption, parent_frame) - not the full object
+    micro_obs = get_latest_observation(profile) if allow_signals else None
+    callback = get_identity_callback(profile) if allow_signals else None
+
     career_data = get_careers_for_identity(profile["identity_current"], n=3)
 
     logger.info(
-        f"[CHAT] {req.name} | lang={language} | "
-        f"has_callback={'yes' if callback else 'no'} | "
-        f"has_observation={'yes' if micro_obs else 'no'}"
+        f"[CHAT] {req.name} | lang={language} | turns={bhavishya_turns} | "
+        f"callback={'yes' if callback else 'no'} | "
+        f"observation={'yes' if micro_obs else 'no'}"
     )
 
-    response = run_margdarshak(
+    # run_margdarshak returns (response_text, is_fallback)
+    response, is_fallback = run_margdarshak(
         question=req.question,
         identity_json=profile["identity_current"],
         history=history,
@@ -476,6 +489,7 @@ async def chat(req: ChatRequest):
         "response": response,
         "language_detected": language,
         "had_callback": callback is not None,
+        "is_fallback": is_fallback,
     }
 
 

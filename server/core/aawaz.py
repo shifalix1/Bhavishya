@@ -12,7 +12,6 @@ AAWAZ_PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "aawaz_prompt.txt")
 CLOUD_MODEL = "gemma-4-26b-a4b-it"
 OFFLINE_MODEL = "gemma4:e4b"
 
-# Cached at module load - no disk I/O per request
 _SYSTEM_PROMPT_CACHE: str | None = None
 
 
@@ -20,25 +19,12 @@ def _load_system_prompt() -> str:
     global _SYSTEM_PROMPT_CACHE
     if _SYSTEM_PROMPT_CACHE is None:
         with open(AAWAZ_PROMPT_PATH, encoding="utf-8") as f:
-            raw = f.read()
-        # Strip the <speak> block instructions from the prompt entirely.
-        # The backend never outputs TTS tags - the frontend layer handles that.
-        # Remove the entire TTS RULE section to avoid conflicting instructions.
-        raw = re.sub(
-            r"1\. THE TTS RULE.*?(?=2\.|\Z)",
-            "",
-            raw,
-            flags=re.DOTALL,
-        )
-        _SYSTEM_PROMPT_CACHE = raw
+            _SYSTEM_PROMPT_CACHE = f.read()
     return _SYSTEM_PROMPT_CACHE
 
 
 def _strip_speak_tags(text: str) -> str:
-    """
-    Safety net: remove any <speak>...</speak> tags the model still outputs.
-    Also strip any stray XML tags that slip through.
-    """
+    """Remove any <speak> tags the model produces. The frontend handles TTS; we send plain text."""
     text = re.sub(r"<speak>.*?</speak>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"</?speak>", "", text, flags=re.IGNORECASE)
     return text.strip()
@@ -54,10 +40,10 @@ async def run_aawaz_transcribe(
     name: str,
 ) -> dict:
     """
-    Multimodal intake: audio + optional image -> transcript + marksheet_data + image_description.
-    Returns image_description for ALL image uploads (not just marksheets).
-    Gracefully falls back and never crashes caller.
-    Note: transcription is cloud-only (multimodal). Ollama cannot do this.
+    Multimodal intake via Gemma 4 cloud (cloud-only, no Ollama fallback for multimodal).
+    Returns: transcript, marksheet_data, image_description, combined_input, mode.
+    image_description contains 2-3 specific anomalies extracted from the uploaded image.
+    These become conversation hooks for Aawaz and identity signal for Darpan.
     """
     if not audio_b64 and not image_b64:
         text = text_fallback or ""
@@ -86,19 +72,16 @@ async def run_aawaz_transcribe(
         instructions.append(
             "Analyse this image carefully.\n"
             "1. If it is a marksheet or report card: extract subject-wise marks as "
-            "'Subject: marks/total' (one per line), and the class, school, year if visible. "
+            "'Subject: marks/total' one per line, plus class, school, year if visible. "
             "Output under the label: MARKSHEET:\n"
-            "2. Regardless of what the image is: do NOT write a general description. "
-            "Instead, find 2-3 specific anomalies, unfinished elements, or unexpected choices "
-            "in this image - things that are unusual, incomplete, or hard to explain at first glance. "
-            "These become conversation hooks, not a summary of what the image is. "
-            "Examples of the kind of thing to notice: erased lines left visible, a section that is "
-            "more detailed than everything around it, something repeated three times in different ways, "
-            "a face left undrawn, a margin note that contradicts the main content, "
-            "a process that looks abandoned halfway. "
-            "Each anomaly should be one concrete specific observation. "
-            "Output under the label: IMAGE_DESCRIPTION: (format: one observation per line, "
-            "no analysis, just what you literally see that is unusual)"
+            "2. Regardless of image type: find 2-3 specific anomalies, unfinished elements, "
+            "or unexpected choices that are unusual or hard to explain at first glance. "
+            "These are conversation hooks, not a summary. "
+            "Examples: erased lines left visible, one section far more detailed than the rest, "
+            "something repeated in different ways, a face left undrawn, a margin note that "
+            "contradicts the main content, a process abandoned halfway. "
+            "Each observation must be one concrete specific thing you literally see. "
+            "Output under the label: IMAGE_DESCRIPTION: (one observation per line, no analysis)"
         )
     parts.append({"text": "\n\n".join(instructions)})
 
@@ -110,7 +93,7 @@ async def run_aawaz_transcribe(
         )
         raw = response.text.strip()
     except Exception as e:
-        print(f"[AAWAZ/TRANSCRIBE] Cloud failed ({e}) - returning text fallback")
+        print(f"[AAWAZ/TRANSCRIBE] Cloud failed: {e} - returning text fallback")
         fallback = text_fallback or ""
         return {
             "transcript": fallback,
@@ -127,11 +110,12 @@ async def run_aawaz_transcribe(
 
     if "TRANSCRIPT:" in raw:
         t_start = raw.index("TRANSCRIPT:") + len("TRANSCRIPT:")
-        next_labels = []
-        for label in ("MARKSHEET:", "IMAGE_DESCRIPTION:"):
-            if label in raw:
-                next_labels.append(raw.index(label))
-        t_end = min(next_labels) if next_labels else len(raw)
+        next_label_positions = [
+            raw.index(label)
+            for label in ("MARKSHEET:", "IMAGE_DESCRIPTION:")
+            if label in raw
+        ]
+        t_end = min(next_label_positions) if next_label_positions else len(raw)
         transcript = raw[t_start:t_end].strip()
     elif not image_b64:
         transcript = raw
@@ -147,6 +131,7 @@ async def run_aawaz_transcribe(
         d_start = raw.index("IMAGE_DESCRIPTION:") + len("IMAGE_DESCRIPTION:")
         image_description = raw[d_start:].strip() or None
 
+    # Image-only upload: transcript comes from text fallback, not audio
     if image_b64 and not audio_b64:
         transcript = text_fallback or ""
 
@@ -177,29 +162,50 @@ async def run_aawaz_chat(
     grade: int,
     name: str,
     language: str = "english",
+    image_anomalies: str | None = None,
 ) -> str:
     """
-    Conversational intake. Cloud first, Ollama fallback.
-    language: "hinglish" | "english"
+    Single conversational turn. Cloud first, Ollama fallback.
+    image_anomalies: the IMAGE_DESCRIPTION string from a prior transcribe call.
+    Injected into the system prompt so Aawaz can reference the uploaded artifact
+    in follow-up questions naturally, without re-sending the image every turn.
     """
     base_prompt = _load_system_prompt()
+
     lang_instruction = (
-        "\n\nIMPORTANT: The student has chosen ENGLISH mode. "
+        "\n\nIMPORTANT: Student is in ENGLISH mode. "
         "Reply entirely in clear, warm English. No Hindi mixing."
         if language == "english"
-        else "\n\nIMPORTANT: The student has chosen HINGLISH mode. "
-        "Mix Hindi and English naturally - like an older sibling texting. "
-        "Write in Roman script (no Devanagari), keep it warm and conversational."
+        else "\n\nIMPORTANT: Student is in HINGLISH mode. "
+        "Mix Hindi and English naturally like an older sibling texting. "
+        "Roman script only, no Devanagari. Keep it warm and casual."
     )
+
     output_rule = (
         "\n\nOUTPUT FORMAT: Plain conversational text only. "
         "No bullet points, no markdown, no XML tags of any kind. "
         "You are texting a teenager, not writing a report."
     )
-    system_prompt = base_prompt + lang_instruction + output_rule
+
+    # Inject image anomalies as system context so Aawaz can reference the artifact
+    # in follow-up questions. Only active for the first 6 exchanges to stay fresh.
+    image_context = ""
+    if image_anomalies:
+        user_turn_count = sum(1 for m in history if m.get("role") == "user")
+        if user_turn_count < 6:
+            image_context = (
+                f"\n\nIMAGE CONTEXT (from student's earlier upload): {image_anomalies}\n"
+                "Reference these specific observations naturally if relevant, "
+                "like you've been thinking about what they showed you. "
+                "Do not announce that you're referencing the image. "
+                "Do not analyse it. Let a specific detail inform one question."
+            )
+
+    system_prompt = base_prompt + lang_instruction + output_rule + image_context
 
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
 
+    # Build conversation history in Gemini multi-turn format
     contents = []
     for msg in history:
         gemini_role = "user" if msg["role"] == "user" else "model"
@@ -221,8 +227,9 @@ async def run_aawaz_chat(
             )
             return _strip_speak_tags(response.text.strip())
         except Exception as e:
-            print(f"[AAWAZ/CLOUD] Failed ({e}) - falling back to Ollama")
+            print(f"[AAWAZ/CLOUD] Failed: {e} - falling back to Ollama")
 
+    # Ollama fallback
     try:
         ollama_msgs = [{"role": "system", "content": system_prompt}]
         for msg in history:
@@ -240,11 +247,11 @@ async def run_aawaz_chat(
         )
         response = ollama.chat(model=OFFLINE_MODEL, messages=ollama_msgs)
         return _strip_speak_tags(response["message"]["content"].strip())
-    except Exception as e2:
-        raise RuntimeError(f"Aawaz chat failed (cloud + ollama both down): {e2}")
+    except Exception as e:
+        raise RuntimeError(f"Aawaz chat failed (cloud + Ollama both down): {e}")
 
 
-# Darpan readiness - signal-based accumulator replacing the old regex gate
+# Darpan readiness - signal accumulator, not a message count gate
 
 _EMOTIONAL_SIGNAL_RE = re.compile(
     r"papa|mummy|parents|ghar|family|chahte|chahti|force|pressure|banna"
@@ -276,7 +283,7 @@ _FAMILY_PRESSURE_RE = re.compile(
 
 
 def _score_message(content: str) -> int:
-    """Score a single message for identity signal richness. Max ~4."""
+    """Score a single message for identity signal richness. Max 5 points."""
     score = 0
     if _EMOTIONAL_SIGNAL_RE.search(content):
         score += 1
@@ -286,7 +293,6 @@ def _score_message(content: str) -> int:
         score += 1
     if _FAMILY_PRESSURE_RE.search(content):
         score += 1
-    # Bonus for longer messages - detail = openness
     if len(content) > 120:
         score += 1
     return score
@@ -294,10 +300,9 @@ def _score_message(content: str) -> int:
 
 def is_ready_for_darpan(history: list) -> bool:
     """
-    Signal-based readiness check. Fires earlier for rich inputs, later for sparse ones.
+    Signal-based readiness gate. Fires earlier for rich inputs, later for sparse ones.
     Minimum: 3 user messages with cumulative signal score >= 5.
-    This means a student who says 'papa ne force kiya engineer banne ke liye aur mujhe
-    drawing pasand hai' in 3 messages will trigger Darpan correctly.
+    Hard fallback: 5+ substantive user messages is always enough regardless of score.
     """
     user_msgs = [m for m in history if m["role"] == "user"]
     if len(user_msgs) < 3:
@@ -307,15 +312,14 @@ def is_ready_for_darpan(history: list) -> bool:
     if total_score >= 5:
         return True
 
-    # Fallback: 5+ messages with at least minimal substance is always enough
     if len(user_msgs) >= 5:
-        substance = sum(1 for m in user_msgs if len(m["content"]) > 40)
-        return substance >= 4
+        substantive = sum(1 for m in user_msgs if len(m["content"]) > 40)
+        return substantive >= 4
 
     return False
 
 
-# Micro-observation extractor - deterministic, zero model cost
+# Micro-observation extractor - deterministic behavioral signal detection, zero model cost
 
 _HEDGE_RE = re.compile(
     r"\bbut\b|\bactually\b|\bi mean\b|\bi don'?t know\b|\bmaybe\b|\bsort of\b"
@@ -329,53 +333,35 @@ _ENTHUSIASM_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Observation confidence levels. Only medium+ surfaces to Margdarshak.
-# low = interesting but unconfirmed; medium = seen twice; high = persistent pattern
-_CONFIDENCE_LOW = "low"
 _CONFIDENCE_MEDIUM = "medium"
 _CONFIDENCE_HIGH = "high"
 
 
-def _observation_confidence(signal_count: int, msg_count: int, recurrences: int) -> str:
-    """
-    Score an observation's confidence based on how many times the signal appeared,
-    across how many messages, and whether it persisted.
-    Only medium+ observations should surface to the student.
-    """
+def _obs_confidence(signal_count: int, msg_count: int, recurrences: int) -> str:
     if recurrences >= 3 and msg_count >= 5:
         return _CONFIDENCE_HIGH
     if recurrences >= 2 or (signal_count >= 2 and msg_count >= 4):
         return _CONFIDENCE_MEDIUM
-    return _CONFIDENCE_LOW
+    return "low"
 
 
 def extract_micro_observations(history: list) -> list[str]:
     """
-    Deterministic extraction of behavioral signals from conversation history.
-    Returns (text, confidence) tuples internally; only medium/high surfaces.
-
-    Priority order (light to heavy - the light ones land hardest):
-    1. Topic recurrence (magical - they didn't know we'd notice)
-    2. Pacing change (opening up or pulling back)
-    3. Hedging pattern (testing safety)
-    4. Enthusiasm shift (energy tells)
-    5. Family pressure recurrence (important but expected - goes last)
-
-    Delayed recognition: observations are only generated after enough messages
-    to confirm the pattern. Early firing = accidental fake profundity.
+    Detect behavioral patterns in conversation history without any model call.
+    Returns medium/high confidence observations only, in priority order:
+    topic recurrence, pacing change, hedging, enthusiasm shift, family pressure.
+    Only medium/high confidence observations are returned to avoid noise.
     """
     user_msgs = [m for m in history if m["role"] == "user"]
     n = len(user_msgs)
     if n < 3:
         return []
 
-    observations = []  # (text, confidence)
+    observations = []
     recent = user_msgs[-5:]
 
-    # 1. TOPIC RECURRENCE - lightest, most magical observation
-    # Only fires after 4+ messages so pattern is real, not coincidence
+    # Topic recurrence: a non-stop word appearing 3+ times is almost never accidental
     if n >= 4:
-        all_words: dict[str, int] = {}
         stop_words = {
             "the",
             "a",
@@ -425,39 +411,35 @@ def extract_micro_observations(history: list) -> list[str]:
             "think",
             "really",
         }
+        word_counts: dict[str, int] = {}
         for m in user_msgs:
-            words = m["content"].lower().split()
-            for w in words:
+            for w in m["content"].lower().split():
                 clean = w.strip(".,!?\"'")
                 if len(clean) > 3 and clean not in stop_words:
-                    all_words[clean] = all_words.get(clean, 0) + 1
+                    word_counts[clean] = word_counts.get(clean, 0) + 1
 
-        # Sort by count descending; pick most recurrent
         recurring = sorted(
-            [(w, c) for w, c in all_words.items() if c >= 3],
+            [(w, c) for w, c in word_counts.items() if c >= 3],
             key=lambda x: x[1],
             reverse=True,
         )
         if recurring:
             top_word, top_count = recurring[0]
-            conf = _observation_confidence(1, n, top_count)
+            conf = _obs_confidence(1, n, top_count)
             if conf in (_CONFIDENCE_MEDIUM, _CONFIDENCE_HIGH):
-                # Delayed phrasing: sounds like we just noticed, not like we were tracking
-                if n >= 6:
-                    text = (
-                        f"Actually - you've brought up '{top_word}' a few times now. "
-                        "Not sure if you noticed that."
-                    )
-                else:
-                    text = f"'{top_word}' keeps coming up. You haven't been asked about it directly."
+                text = (
+                    f"Actually - you've brought up '{top_word}' a few times now. "
+                    "Not sure if you noticed that."
+                    if n >= 6
+                    else f"'{top_word}' keeps coming up. You haven't been asked about it directly."
+                )
                 observations.append((text, conf))
 
-    # 2. PACING CHANGE - message length trend
+    # Pacing change: message length growing = opening up, shrinking = pulling back
     lengths = [len(m["content"]) for m in recent]
     if len(lengths) >= 3:
         if lengths[-1] > lengths[0] * 1.6:
-            conf = _observation_confidence(1, n, 1)
-            # Only fires at medium+ i.e. after enough messages to be sure
+            conf = _obs_confidence(1, n, 1)
             if n >= 5 and conf in (_CONFIDENCE_MEDIUM, _CONFIDENCE_HIGH):
                 observations.append(
                     (
@@ -473,21 +455,19 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
             )
 
-    # 3. HEDGING PATTERN - softening before committing
-    hedge_msgs = [m for m in recent if _HEDGE_RE.search(m["content"])]
-    hedge_count = len(hedge_msgs)
+    # Hedging: pulling back before committing to a statement
+    hedge_count = sum(1 for m in recent if _HEDGE_RE.search(m["content"]))
     if hedge_count >= 2:
-        conf = _observation_confidence(hedge_count, n, hedge_count)
+        conf = _obs_confidence(hedge_count, n, hedge_count)
         if conf in (_CONFIDENCE_MEDIUM, _CONFIDENCE_HIGH):
             observations.append(
                 ("You keep almost saying something, then pulling back a little.", conf)
             )
 
-    # 4. ENTHUSIASM SHIFT - where energy actually is
-    enthusiasm_msgs = [m for m in recent if _ENTHUSIASM_RE.search(m["content"])]
-    enthusiasm_count = len(enthusiasm_msgs)
+    # Enthusiasm shift: energy changes on specific topics
+    enthusiasm_count = sum(1 for m in recent if _ENTHUSIASM_RE.search(m["content"]))
     if enthusiasm_count >= 2:
-        conf = _observation_confidence(enthusiasm_count, n, enthusiasm_count)
+        conf = _obs_confidence(enthusiasm_count, n, enthusiasm_count)
         if conf in (_CONFIDENCE_MEDIUM, _CONFIDENCE_HIGH):
             observations.append(
                 (
@@ -496,12 +476,10 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
             )
 
-    # 5. FAMILY PRESSURE - last, because it's the one they already know about
-    family_mentions = sum(
-        1 for m in user_msgs if _FAMILY_PRESSURE_RE.search(m["content"])
-    )
-    if family_mentions >= 3:
-        conf = _observation_confidence(family_mentions, n, family_mentions)
+    # Family pressure recurrence: they keep bringing it back unprompted
+    family_count = sum(1 for m in user_msgs if _FAMILY_PRESSURE_RE.search(m["content"]))
+    if family_count >= 3:
+        conf = _obs_confidence(family_count, n, family_count)
         if conf in (_CONFIDENCE_MEDIUM, _CONFIDENCE_HIGH):
             observations.append(
                 (
@@ -510,14 +488,4 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
             )
 
-    # Return only text of medium/high confidence observations (already filtered above)
-    # Strip confidence tuples for backward compat with caller
     return [text for text, _ in observations]
-
-
-# Family pressure regex reused from scoring
-_FAMILY_PRESSURE_RE_OBS = re.compile(
-    r"papa|mummy|mom|dad|parents|ghar|family|bolte|bolti|force|pressure"
-    r"|chahte hain|chahti hain|expect|they want|unhe chahiye",
-    re.IGNORECASE,
-)
