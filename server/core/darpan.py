@@ -7,8 +7,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Hardcoded demo-safe fallback identity. Used when both cloud and Ollama fail.
-# Prevents the demo from showing a raw error state.
+_CLOUD_MODEL = "gemma-4-26b-a4b-it"
+_OLLAMA_MODEL = "gemma4:e4b"
+
+# Cached once at first call, never read from disk again.
+_PROMPT_CACHE: str | None = None
+
+# Singleton client - avoids TLS renegotiation on every call (~50ms saved per request).
+_GEMINI_CLIENT: genai.Client | None = None
+
+_REQUIRED_KEYS = [
+    "thinking_style",
+    "core_values",
+    "hidden_strengths",
+    "active_fears",
+    "energy_signature",
+    "identity_confidence",
+]
+
+# Generic fallback. Fires only when both cloud and Ollama fail.
+# identity_confidence=3 tells Margdarshak not to make strong claims.
 _FALLBACK_IDENTITY = {
     "thinking_style": "Learns by doing and experimenting rather than following instructions.",
     "core_values": ["independence", "creativity", "authenticity"],
@@ -29,18 +47,29 @@ _FALLBACK_IDENTITY = {
 }
 
 
+def _load_prompt() -> str:
+    global _PROMPT_CACHE
+    if _PROMPT_CACHE is None:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base, "prompts", "darpan_prompt.txt")
+        with open(path, encoding="utf-8") as f:
+            _PROMPT_CACHE = f.read()
+    return _PROMPT_CACHE
+
+
+def _get_client() -> genai.Client:
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    return _GEMINI_CLIENT
+
+
 def run_darpan(student_input: str, grade: int, previous_session: dict = None) -> dict:
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    prompt_path = os.path.join(BASE_DIR, "prompts", "darpan_prompt.txt")
-
-    with open(prompt_path, encoding="utf-8") as f:
-        base_prompt = f.read()
-
-    system_prompt = base_prompt
+    system_prompt = _load_prompt()
 
     user_msg = f"Grade: {grade}\nStudent says: {student_input}"
     if previous_session:
-        # Exclude the _fallback flag from previous session context
+        # Strip internal flags before sending to model.
         clean_prev = {k: v for k, v in previous_session.items() if k != "_fallback"}
         user_msg += f"\nPrevious identity snapshot: {json.dumps(clean_prev, ensure_ascii=False)}"
 
@@ -49,16 +78,18 @@ def run_darpan(student_input: str, grade: int, previous_session: dict = None) ->
 
     try:
         if mode == "cloud":
-            client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-            response = client.models.generate_content(
-                model="gemma-4-26b-a4b-it",
+            response = _get_client().models.generate_content(
+                model=_CLOUD_MODEL,
                 contents=user_msg,
-                config={"system_instruction": system_prompt},
+                config={
+                    "system_instruction": system_prompt,
+                    "http_options": {"timeout": 25000},
+                },
             )
             raw = response.text.strip()
         else:
             response = ollama.chat(
-                model="gemma4:e4b",
+                model=_OLLAMA_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
@@ -67,34 +98,22 @@ def run_darpan(student_input: str, grade: int, previous_session: dict = None) ->
             raw = response["message"]["content"].strip()
 
         match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            raw = match.group(0)
-        else:
-            raise ValueError("No JSON object found in darpan response.")
+        if not match:
+            raise ValueError("No JSON object found in Darpan response.")
+        result = json.loads(match.group(0))
 
-        result = json.loads(raw)
-
-        # Validate required keys exist
-        required = [
-            "thinking_style",
-            "core_values",
-            "hidden_strengths",
-            "active_fears",
-            "energy_signature",
-            "identity_confidence",
-        ]
-        for key in required:
+        for key in _REQUIRED_KEYS:
             if key not in result:
                 raise ValueError(f"Missing required key: {key}")
 
         return result
 
     except json.JSONDecodeError as e:
-        print(f"[{mode.upper()} MODE] Darpan JSON parse failed: {e}\nRaw: {raw[:300]}")
+        print(f"[DARPAN/{mode.upper()}] JSON parse failed: {e} | raw: {raw[:200]}")
         return _FALLBACK_IDENTITY
     except ValueError as e:
-        print(f"[{mode.upper()} MODE] Darpan schema validation failed: {e}")
+        print(f"[DARPAN/{mode.upper()}] Validation failed: {e}")
         return _FALLBACK_IDENTITY
     except Exception as e:
-        print(f"[{mode.upper()} MODE] Darpan error: {e}")
+        print(f"[DARPAN/{mode.upper()}] Error: {e}")
         return _FALLBACK_IDENTITY
