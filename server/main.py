@@ -50,9 +50,19 @@ from core.careers import get_careers_for_identity
 
 app = FastAPI(title="Bhavishya API", version="2.2.0")
 
+# Read allowed origins from env for deployment flexibility.
+# Falls back to localhost dev ports if not set.
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -385,6 +395,7 @@ async def run_session(req: SessionRequest):
 
     return {
         "identity": identity,
+        "identity_confidence": identity.get("identity_confidence", 3),
         "session_count": profile["session_count"],
         "delta": delta,
         "should_simulate": True,
@@ -490,6 +501,9 @@ async def chat(req: ChatRequest):
         "language_detected": language,
         "had_callback": callback is not None,
         "is_fallback": is_fallback,
+        "identity_confidence": profile["identity_current"].get(
+            "identity_confidence", 5
+        ),
     }
 
 
