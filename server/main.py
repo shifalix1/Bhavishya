@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,6 @@ from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,14 +26,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bhavishya")
 
-from core.darpan import run_darpan
-from core.simulator import run_simulator
-from core.margdarshak import run_margdarshak
+# Core imports
+
+from core.darpan import run_darpan, init_client as darpan_init
+from core.simulator import run_simulator, init_client as simulator_init
+from core.margdarshak import run_margdarshak, init_client as margdarshak_init
 from core.aawaz import (
     run_aawaz_transcribe,
     run_aawaz_chat,
     is_ready_for_darpan,
     extract_micro_observations,
+    init_client as aawaz_init,
 )
 from core.memory import (
     load_student,
@@ -50,18 +53,111 @@ from core.memory import (
     get_identity_delta,
     get_identity_callback,
     trim_conversation_history,
+    needs_compression,
+    compress_history,
 )
 from core.language import detect_language
 from core.careers import get_careers_for_identity
 
-# ── Rate limiter ──────────────────────────────────────────────────────────────
+# Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="Bhavishya API", version="2.3.0")
+# Rolling summarizer
+# Injected into compress_history() so memory.py stays model-agnostic.
+# Uses the cloud client from margdarshak (already initialised at startup).
+
+_SUMMARY_MODEL = "gemma-4-26b-a4b-it"
+_SUMMARY_SYSTEM = (
+    "You are a memory compression assistant. "
+    "You will receive a sequence of conversation turns between a student and Bhavishya AI. "
+    "Your job: write a dense, factual 3-5 sentence summary that captures: "
+    "(1) the student's core motivations and interests mentioned, "
+    "(2) any family pressure or constraints revealed, "
+    "(3) any specific fears or hopes expressed, "
+    "(4) any key decisions or turning points discussed. "
+    "Write in third person. Plain prose only. No bullet points. No headers."
+)
+
+
+async def _summarize_history_block(text: str) -> str:
+    """
+    Async summarizer injected into compress_history().
+    Uses a lightweight generation call — minimal tokens, 10s timeout.
+    Falls back to a simple truncated excerpt if the model call fails.
+    """
+    from google import genai as _genai
+
+    api_key = os.getenv("GOOGLE_API_KEY", "")
+    if not api_key:
+        # No API key: return a naive first-200-word excerpt instead of crashing.
+        words = text.split()
+        return "Earlier in the conversation: " + " ".join(words[:200])
+
+    try:
+        client = _genai.Client(api_key=api_key)
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=_SUMMARY_MODEL,
+            contents=text,
+            config={
+                "system_instruction": _SUMMARY_SYSTEM,
+                "http_options": {"timeout": 10000},
+            },
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.warning(
+            f"[SUMMARIZER] LLM summarization failed ({e}); using excerpt fallback."
+        )
+        words = text.split()
+        return "Earlier in the conversation: " + " ".join(words[:200])
+
+
+async def _maybe_compress(profile: dict) -> dict:
+    """
+    Check if rolling compression is needed and run it if so.
+    Called in chat and session endpoints before save_student().
+    """
+    if needs_compression(profile):
+        logger.info(
+            f"[MEMORY] Compressing history for {profile.get('username', '?')} "
+            f"({len(profile.get('conversation_history', []))} messages -> rolling summary)"
+        )
+        profile = await compress_history(profile, _summarize_history_block)
+    return profile
+
+
+# Lifespan: startup pre-warm
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Pre-warm all four Gemini client singletons at startup.
+    This runs the TLS handshake and object init once, before any request arrives,
+    eliminating the per-module lazy-init race under concurrent load.
+    """
+    logger.info("[STARTUP] Pre-warming Gemini clients...")
+    mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
+    if mode == "cloud":
+        await asyncio.to_thread(aawaz_init)
+        await asyncio.to_thread(darpan_init)
+        await asyncio.to_thread(margdarshak_init)
+        await asyncio.to_thread(simulator_init)
+        logger.info("[STARTUP] All Gemini clients ready.")
+    else:
+        logger.info("[STARTUP] Ollama mode - skipping Gemini client pre-warm.")
+    yield
+    # Shutdown: nothing to clean up for stateless HTTP clients.
+    logger.info("[SHUTDOWN] Bhavishya API shutting down.")
+
+
+# App
+
+app = FastAPI(title="Bhavishya API", version="3.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
 _CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(
@@ -78,10 +174,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── X-API-Key auth middleware ─────────────────────────────────────────────────
-# Store BHAVISHYA_API_KEY in .env. All non-health endpoints require this header.
+# X-API-Key auth middleware
 _API_KEY = os.getenv("BHAVISHYA_API_KEY", "")
-
 UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 
@@ -90,20 +184,18 @@ async def api_key_middleware(request: Request, call_next):
     if request.url.path in UNPROTECTED_PATHS:
         return await call_next(request)
     if not _API_KEY:
-        # Dev mode: no key configured → allow all (log a warning)
         logger.warning("BHAVISHYA_API_KEY not set - running unauthenticated!")
         return await call_next(request)
-    incoming = request.headers.get("X-API-Key", "")
-    if incoming != _API_KEY:
+    if request.headers.get("X-API-Key", "") != _API_KEY:
         return JSONResponse(
             status_code=401, content={"detail": "Invalid or missing API key."}
         )
     return await call_next(request)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# Helpers
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
-_CONV_HISTORY_LIMIT = 50  # fix #9: cap stored messages
+_CONV_HISTORY_LIMIT = 50  # emergency safety cap; compression fires at 40
 
 
 def validate_username(username: str) -> None:
@@ -119,7 +211,7 @@ def validate_pin(pin: str) -> None:
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
 
 
-# ── Request models ────────────────────────────────────────────────────────────
+# Request models
 
 
 class RegisterRequest(BaseModel):
@@ -180,10 +272,13 @@ class AawazChatRequest(BaseModel):
     image_anomalies: Optional[str] = None
 
 
-# ── Routers ───────────────────────────────────────────────────────────────────
+# Routers
 auth_router = APIRouter(prefix="", tags=["auth"])
 aawaz_router = APIRouter(prefix="/aawaz", tags=["aawaz"])
 core_router = APIRouter(prefix="", tags=["core"])
+
+
+# Health
 
 
 @app.get("/health", tags=["meta"])
@@ -191,11 +286,11 @@ async def health():
     return {
         "status": "ok",
         "model": os.getenv("BHAVISHYA_MODE", "cloud"),
-        "version": "2.3.0",
+        "version": "3.0.0",
     }
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
+# Auth routes
 
 
 @auth_router.post("/register")
@@ -252,9 +347,10 @@ async def login(req: LoginRequest, request: Request):
 
     if not verify_pin(req.pin, profile["pin_hash"]):
         logger.warning(f"Failed login attempt for username: {req.username}")
-        raise HTTPException(status_code=401, detail="Wrong PIN.")
+        raise HTTPException(status_code=401, detail="Incorrect PIN.")
 
-    logger.info(f"Student logged in: {req.username}")
+    logger.info(f"Login: {req.username} | session #{profile.get('session_count', 0)}")
+
     return {
         "username": profile["username"],
         "name": profile["name"],
@@ -270,53 +366,63 @@ async def login(req: LoginRequest, request: Request):
 @auth_router.post("/onboard")
 @limiter.limit("10/minute")
 async def onboard(req: OnboardRequest, request: Request):
-    """Legacy onboard flow kept for backward compatibility."""
+    """Legacy onboard flow (no PIN). Still supported for hackathon demo personas."""
     profile = load_student(req.name, req.grade, req.uid)
-    is_returning = profile is not None
+    if profile:
+        logger.info(f"Returning student (legacy onboard): {req.name}")
+        return {
+            "username": profile.get("username", req.uid),
+            "name": profile["name"],
+            "grade": profile["grade"],
+            "uid": profile.get("uid", req.uid),
+            "is_returning": True,
+            "session_count": profile.get("session_count", 0),
+            "has_identity": bool(profile.get("identity_current")),
+            "has_futures": bool(profile.get("futures_generated")),
+        }
 
-    if not profile:
-        profile = create_new_profile(req.name, req.grade, req.uid)
-        save_student(profile)
+    profile = create_new_profile(name=req.name.strip(), grade=req.grade, uid=req.uid)
+    save_student(profile)
+    logger.info(f"New student (legacy onboard): {req.name} (grade {req.grade})")
 
     return {
-        "is_returning": is_returning,
-        "session_count": profile.get("session_count", 0),
-        "has_identity": bool(profile.get("identity_current")),
-        "has_futures": bool(profile.get("futures_generated")),
+        "username": profile["username"],
         "name": profile["name"],
         "grade": profile["grade"],
-        "uid": req.uid,
+        "uid": profile["uid"],
+        "is_returning": False,
+        "session_count": 0,
+        "has_identity": False,
+        "has_futures": False,
     }
 
 
-# ── Aawaz routes ──────────────────────────────────────────────────────────────
+# Aawaz routes
 
 
 @aawaz_router.post("/transcribe")
 @limiter.limit("10/minute")
 async def aawaz_transcribe(req: AawazTranscribeRequest, request: Request):
-    if not req.audio_b64 and not req.image_b64 and not req.text_fallback:
-        raise HTTPException(status_code=400, detail="No input provided.")
+    profile = load_student(req.name, req.grade, req.uid)
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail="Student profile not found. Please register or onboard first.",
+        )
 
-    logger.info(
-        f"[AAWAZ/TRANSCRIBE] {req.name} | "
-        f"audio={'yes' if req.audio_b64 else 'no'} "
-        f"image={'yes' if req.image_b64 else 'no'}"
+    result = await run_aawaz_transcribe(
+        audio_b64=req.audio_b64,
+        audio_mime=req.audio_mime or "audio/webm",
+        image_b64=req.image_b64,
+        image_mime=req.image_mime or "image/jpeg",
+        text_fallback=req.text_fallback,
+        grade=req.grade,
+        name=req.name,
     )
 
-    try:
-        result = await run_aawaz_transcribe(
-            audio_b64=req.audio_b64,
-            audio_mime=req.audio_mime or "audio/webm",
-            image_b64=req.image_b64,
-            image_mime=req.image_mime or "image/jpeg",
-            text_fallback=req.text_fallback,
-            grade=req.grade,
-            name=req.name,
-        )
-    except RuntimeError as e:
-        logger.error(f"[AAWAZ/TRANSCRIBE] RuntimeError: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if result.get("image_description"):
+        profile["image_anomalies"] = result["image_description"]
+        save_student(profile)
 
     return result
 
@@ -324,7 +430,6 @@ async def aawaz_transcribe(req: AawazTranscribeRequest, request: Request):
 @aawaz_router.post("/chat")
 @limiter.limit("10/minute")
 async def aawaz_chat(req: AawazChatRequest, request: Request):
-    # FIX #6: do NOT auto-create profile here. Require explicit register/onboard first.
     profile = load_student(req.name, req.grade, req.uid)
     if not profile:
         raise HTTPException(
@@ -340,11 +445,7 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
         f"lang={req.language}"
     )
 
-    image_anomalies = req.image_anomalies
-    if image_anomalies:
-        profile["image_anomalies"] = image_anomalies
-    elif profile.get("image_anomalies"):
-        image_anomalies = profile["image_anomalies"]
+    image_anomalies = req.image_anomalies or profile.get("image_anomalies")
 
     try:
         response = await run_aawaz_chat(
@@ -372,7 +473,6 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
 
     save_student(profile)
 
-    # FIX #8: only signal readiness if darpan hasn't run yet
     already_run = profile.get("darpan_run", False)
     ready = False
     combined_input = None
@@ -391,7 +491,7 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
     }
 
 
-# ── Core routes ───────────────────────────────────────────────────────────────
+# Core routes
 
 
 @core_router.post("/session")
@@ -421,7 +521,6 @@ async def run_session(req: SessionRequest, request: Request):
         run_darpan, enriched_input, req.grade, previous_identity
     )
 
-    # FIX #11: warn when darpan output looks like the generic fallback
     thinking = identity.get("thinking_style", "")
     conf = identity.get("identity_confidence", 5)
     if conf <= 3 and "learns by doing" in thinking.lower():
@@ -441,11 +540,13 @@ async def run_session(req: SessionRequest, request: Request):
         {"session": profile["session_count"] + 1, "snapshot": identity}
     )
     profile["session_count"] += 1
-    # FIX #8: mark darpan as run so aawaz/chat won't re-trigger
     profile["darpan_run"] = True
     profile = add_message(profile, "user", req.student_input)
-    # FIX #9: trim conversation history
+
+    # Rolling summary check before save
+    profile = await _maybe_compress(profile)
     profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
+
     save_student(profile)
 
     return {
@@ -513,7 +614,6 @@ async def chat(req: ChatRequest, request: Request):
     language = detect_language(req.question)
     history = get_last_n_messages(profile, n=5)
 
-    # FIX #13: check full conversation_history length, not trimmed history
     bhavishya_turns = sum(
         1
         for m in profile.get("conversation_history", [])
@@ -545,13 +645,16 @@ async def chat(req: ChatRequest, request: Request):
         micro_observation=micro_obs,
         identity_callback=callback,
         career_data=career_data,
-        total_bhavishya_turns=bhavishya_turns,  # FIX #13
+        total_bhavishya_turns=bhavishya_turns,
     )
 
     profile = add_message(profile, "user", req.question)
     profile = add_message(profile, "bhavishya", response)
-    # FIX #9: trim on every chat turn
+
+    # Rolling summary check before save
+    profile = await _maybe_compress(profile)
     profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
+
     save_student(profile)
 
     return {
@@ -565,11 +668,7 @@ async def chat(req: ChatRequest, request: Request):
     }
 
 
-# FIX #5: /profile endpoints removed. Profile data is only accessible via authenticated
-# /login response. The open GET endpoints exposed pin_hash + full history to anyone.
-# If you need a profile fetch, add it behind login auth with a session token.
-
-
+# Router registration
 app.include_router(auth_router)
 app.include_router(aawaz_router)
 app.include_router(core_router)

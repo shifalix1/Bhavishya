@@ -1,20 +1,22 @@
-import os
-import re
+import asyncio
 import json
+import logging
+import os
+
 import ollama
-from google import genai
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
+
+logger = logging.getLogger("bhavishya.darpan")
 
 _CLOUD_MODEL = "gemma-4-26b-a4b-it"
 _OLLAMA_MODEL = "gemma4:e4b"
 
-# Cached once at first call, never read from disk again.
 _PROMPT_CACHE: str | None = None
-
-# Singleton client - avoids TLS renegotiation on every call (~50ms saved per request).
 _GEMINI_CLIENT: genai.Client | None = None
+_CLIENT_LOCK = asyncio.Lock()  # guards lazy init
 
 _REQUIRED_KEYS = [
     "thinking_style",
@@ -25,8 +27,6 @@ _REQUIRED_KEYS = [
     "identity_confidence",
 ]
 
-# Generic fallback. Fires only when both cloud and Ollama fail.
-# identity_confidence=3 tells Margdarshak not to make strong claims.
 _FALLBACK_IDENTITY = {
     "thinking_style": "Learns by doing and experimenting rather than following instructions.",
     "core_values": ["independence", "creativity", "authenticity"],
@@ -47,6 +47,9 @@ _FALLBACK_IDENTITY = {
 }
 
 
+# Initialisation
+
+
 def _load_prompt() -> str:
     global _PROMPT_CACHE
     if _PROMPT_CACHE is None:
@@ -57,24 +60,50 @@ def _load_prompt() -> str:
     return _PROMPT_CACHE
 
 
+def init_client() -> None:
+    """
+    Pre-warm the Gemini client at application startup (called from FastAPI lifespan).
+    Safe to call multiple times; protected by module-level lock during async init.
+    """
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        logger.info("[DARPAN] Gemini client initialised.")
+
+
 def _get_client() -> genai.Client:
+    """
+    Synchronous accessor used inside asyncio.to_thread.
+    By the time any request arrives, lifespan has already called init_client(),
+    so this path only triggers in tests or direct script usage.
+    """
     global _GEMINI_CLIENT
     if _GEMINI_CLIENT is None:
         _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     return _GEMINI_CLIENT
 
 
-def run_darpan(student_input: str, grade: int, previous_session: dict = None) -> dict:
+# Core logic
+
+
+def run_darpan(
+    student_input: str, grade: int, previous_session: dict | None = None
+) -> dict:
+    """
+    Synchronous entry point — called via asyncio.to_thread from the FastAPI route.
+
+    JSON mode means response.text is already valid JSON; we parse it directly.
+    If the model still manages to return invalid JSON (extremely rare in JSON mode),
+    we fall back gracefully instead of crashing.
+    """
     system_prompt = _load_prompt()
 
     user_msg = f"Grade: {grade}\nStudent says: {student_input}"
     if previous_session:
-        # Strip internal flags before sending to model.
         clean_prev = {k: v for k, v in previous_session.items() if k != "_fallback"}
         user_msg += f"\nPrevious identity snapshot: {json.dumps(clean_prev, ensure_ascii=False)}"
 
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
-    raw = ""
 
     try:
         if mode == "cloud":
@@ -83,37 +112,40 @@ def run_darpan(student_input: str, grade: int, previous_session: dict = None) ->
                 contents=user_msg,
                 config={
                     "system_instruction": system_prompt,
+                    # JSON mode: model is structurally constrained to emit valid JSON.
+                    # No regex extraction required; json.loads() runs directly.
+                    "response_mime_type": "application/json",
                     "http_options": {"timeout": 25000},
                 },
             )
-            raw = response.text.strip()
+            result = json.loads(response.text)
         else:
+            # Ollama does not support response_mime_type; keep the prompt-level JSON
+            # instruction from darpan_prompt.txt and parse best-effort.
             response = ollama.chat(
                 model=_OLLAMA_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
                 ],
+                format="json",  # Ollama's equivalent of JSON mode
             )
-            raw = response["message"]["content"].strip()
+            result = json.loads(response["message"]["content"])
 
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            raise ValueError("No JSON object found in Darpan response.")
-        result = json.loads(match.group(0))
-
-        for key in _REQUIRED_KEYS:
-            if key not in result:
-                raise ValueError(f"Missing required key: {key}")
+        # Validate required keys are present
+        missing = [k for k in _REQUIRED_KEYS if k not in result]
+        if missing:
+            logger.warning(f"[DARPAN/{mode.upper()}] Missing keys: {missing}")
+            raise ValueError(f"Missing required keys: {missing}")
 
         return result
 
     except json.JSONDecodeError as e:
-        print(f"[DARPAN/{mode.upper()}] JSON parse failed: {e} | raw: {raw[:200]}")
+        logger.error(f"[DARPAN/{mode.upper()}] JSON parse failed: {e}")
         return _FALLBACK_IDENTITY
     except ValueError as e:
-        print(f"[DARPAN/{mode.upper()}] Validation failed: {e}")
+        logger.warning(f"[DARPAN/{mode.upper()}] Validation failed: {e}")
         return _FALLBACK_IDENTITY
     except Exception as e:
-        print(f"[DARPAN/{mode.upper()}] Error: {e}")
+        logger.error(f"[DARPAN/{mode.upper()}] Unexpected error: {e}")
         return _FALLBACK_IDENTITY

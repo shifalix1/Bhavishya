@@ -1,11 +1,15 @@
 import asyncio
+import logging
 import os
 import re
+
 import ollama
-from google import genai
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
+
+logger = logging.getLogger("bhavishya.aawaz")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AAWAZ_PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "aawaz_prompt.txt")
@@ -17,11 +21,22 @@ _SYSTEM_PROMPT_CACHE: str | None = None
 _GEMINI_CLIENT: genai.Client | None = None
 
 
+# Initialisation
+
+
 def _get_client() -> genai.Client:
     global _GEMINI_CLIENT
     if _GEMINI_CLIENT is None:
         _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     return _GEMINI_CLIENT
+
+
+def init_client() -> None:
+    """Pre-warm at startup. Safe to call multiple times."""
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        logger.info("[AAWAZ] Gemini client initialised.")
 
 
 def _load_system_prompt() -> str:
@@ -33,10 +48,13 @@ def _load_system_prompt() -> str:
 
 
 def _strip_speak_tags(text: str) -> str:
-    """Remove any <speak> tags the model produces. The frontend handles TTS; we send plain text."""
+    """Remove any <speak> tags the model produces."""
     text = re.sub(r"<speak>.*?</speak>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"</?speak>", "", text, flags=re.IGNORECASE)
     return text.strip()
+
+
+# Multimodal transcription
 
 
 async def run_aawaz_transcribe(
@@ -49,10 +67,8 @@ async def run_aawaz_transcribe(
     name: str,
 ) -> dict:
     """
-    Multimodal intake via Gemma 4 cloud (cloud-only, no Ollama fallback for multimodal).
+    Multimodal intake via Gemma 4 cloud (cloud-only; no Ollama fallback for multimodal).
     Returns: transcript, marksheet_data, image_description, combined_input, mode.
-    image_description contains 2-3 specific anomalies extracted from the uploaded image.
-    These become conversation hooks for Aawaz and identity signal for Darpan.
     """
     if not audio_b64 and not image_b64:
         text = text_fallback or ""
@@ -96,6 +112,7 @@ async def run_aawaz_transcribe(
 
     try:
         client = _get_client()
+        # asyncio.to_thread keeps the event loop free during the blocking SDK call
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=CLOUD_MODEL,
@@ -103,7 +120,7 @@ async def run_aawaz_transcribe(
         )
         raw = response.text.strip()
     except Exception as e:
-        print(f"[AAWAZ/TRANSCRIBE] Cloud failed: {e} - returning text fallback")
+        logger.error(f"[AAWAZ/TRANSCRIBE] Cloud failed: {e}")
         fallback = text_fallback or ""
         return {
             "transcript": fallback,
@@ -141,7 +158,6 @@ async def run_aawaz_transcribe(
         d_start = raw.index("IMAGE_DESCRIPTION:") + len("IMAGE_DESCRIPTION:")
         image_description = raw[d_start:].strip() or None
 
-    # Image-only upload: transcript comes from text fallback, not audio
     if image_b64 and not audio_b64:
         transcript = text_fallback or ""
 
@@ -166,6 +182,47 @@ async def run_aawaz_transcribe(
     }
 
 
+# Conversational chat
+
+
+def _build_aawaz_contents(history: list, message: str) -> list:
+    """Build Gemini multi-turn conversation contents list."""
+    contents = []
+    for msg in history:
+        gemini_role = "user" if msg["role"] == "user" else "model"
+        contents.append({"role": gemini_role, "parts": [{"text": msg["content"]}]})
+    contents.append({"role": "user", "parts": [{"text": message}]})
+    return contents
+
+
+def _run_aawaz_cloud(system_prompt: str, contents: list) -> str:
+    """Synchronous cloud call — invoked inside asyncio.to_thread."""
+    response = _get_client().models.generate_content(
+        model=CLOUD_MODEL,
+        contents=contents,
+        config={
+            "system_instruction": system_prompt,
+            "http_options": {"timeout": 20000},
+        },
+    )
+    return _strip_speak_tags(response.text.strip())
+
+
+def _run_aawaz_ollama(system_prompt: str, history: list, message: str) -> str:
+    """Synchronous Ollama call — invoked inside asyncio.to_thread."""
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in history:
+        messages.append(
+            {
+                "role": "user" if msg["role"] == "user" else "assistant",
+                "content": msg["content"],
+            }
+        )
+    messages.append({"role": "user", "content": message})
+    response = ollama.chat(model=OFFLINE_MODEL, messages=messages)
+    return _strip_speak_tags(response["message"]["content"].strip())
+
+
 async def run_aawaz_chat(
     message: str,
     history: list,
@@ -175,10 +232,10 @@ async def run_aawaz_chat(
     image_anomalies: str | None = None,
 ) -> str:
     """
-    Single conversational turn. Cloud first, Ollama fallback.
-    image_anomalies: the IMAGE_DESCRIPTION string from a prior transcribe call.
-    Injected into the system prompt so Aawaz can reference the uploaded artifact
-    in follow-up questions naturally, without re-sending the image every turn.
+    Async conversational turn. Cloud first, Ollama fallback.
+
+    Both cloud and Ollama calls are wrapped in asyncio.to_thread so the event loop
+    is never blocked, even under concurrent load.
     """
     base_prompt = _load_system_prompt()
 
@@ -197,8 +254,6 @@ async def run_aawaz_chat(
         "You are texting a teenager, not writing a report."
     )
 
-    # Inject image anomalies as system context so Aawaz can reference the artifact
-    # in follow-up questions. Only active for the first 6 exchanges to stay fresh.
     image_context = ""
     if image_anomalies:
         user_turn_count = sum(1 for m in history if m.get("role") == "user")
@@ -212,91 +267,63 @@ async def run_aawaz_chat(
             )
 
     system_prompt = base_prompt + lang_instruction + output_rule + image_context
-
+    contents = _build_aawaz_contents(history, message)
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
 
-    # Build conversation history in Gemini multi-turn format
-    contents = []
-    for msg in history:
-        gemini_role = "user" if msg["role"] == "user" else "model"
-        contents.append({"role": gemini_role, "parts": [{"text": msg["content"]}]})
-    contents.append(
-        {
-            "role": "user",
-            "parts": [{"text": f"[Student: {name}, Class: {grade}]\n{message}"}],
-        }
-    )
-
+    # Cloud path (non-blocking)
     if mode == "cloud":
         try:
-            client = _get_client()
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=CLOUD_MODEL,
-                contents=contents,
-                config={"system_instruction": system_prompt},
+            return await asyncio.to_thread(_run_aawaz_cloud, system_prompt, contents)
+        except Exception as cloud_err:
+            logger.warning(
+                f"[AAWAZ] Cloud failed ({cloud_err}), falling back to Ollama."
             )
-            return _strip_speak_tags(response.text.strip())
-        except Exception as e:
-            print(f"[AAWAZ/CLOUD] Failed: {e} - falling back to Ollama")
 
-    # Ollama fallback
+    # Ollama fallback (non-blocking)
     try:
-        ollama_msgs = [{"role": "system", "content": system_prompt}]
-        for msg in history:
-            ollama_msgs.append(
-                {
-                    "role": "user" if msg["role"] == "user" else "assistant",
-                    "content": msg["content"],
-                }
-            )
-        ollama_msgs.append(
-            {
-                "role": "user",
-                "content": f"[Student: {name}, Class: {grade}]\n{message}",
-            }
+        return await asyncio.to_thread(
+            _run_aawaz_ollama, system_prompt, history, message
         )
-        response = await asyncio.to_thread(
-            ollama.chat, model=OFFLINE_MODEL, messages=ollama_msgs
-        )
-        return _strip_speak_tags(response["message"]["content"].strip())
-    except Exception as e:
-        raise RuntimeError(f"Aawaz chat failed (cloud + Ollama both down): {e}")
+    except Exception as ollama_err:
+        logger.error(f"[AAWAZ] Ollama also failed: {ollama_err}")
+        raise RuntimeError(
+            "Both cloud and Ollama unavailable for Aawaz chat."
+        ) from ollama_err
 
 
-# Darpan readiness - signal accumulator, not a message count gate
+# Readiness + micro-observation (deterministic, zero model cost)
 
-_EMOTIONAL_SIGNAL_RE = re.compile(
-    r"papa|mummy|parents|ghar|family|chahte|chahti|force|pressure|banna"
-    r"|doctor|engineer|artist|teacher|career|future|dream|sapna"
-    r"|love|hate|scared|dar|nervous|excited|proud|ashamed|guilty"
-    r"|want|don't want|nahi chahta|nahi chahti|mujhe lagna|main sochta|main sochti",
-    re.IGNORECASE,
+import re as _re  # already imported above; alias kept for readability
+
+_EMOTIONAL_SIGNAL_RE = _re.compile(
+    r"\bfeel\b|\bfelt\b|\bhate\b|\blove\b|\bscared\b|\bafraid\b|\bexcited\b"
+    r"|\banxious\b|\bworried\b|\bhappy\b|\bsad\b|\bangry\b|\bdarpan\b"
+    r"|\bdar\b|\bkhushi\b|\bdukh\b|\bghabra\b|\bpasand\b|\bnapasand\b",
+    _re.IGNORECASE,
 )
 
-_DESIRE_RE = re.compile(
-    r"want|wish|dream|chahta|chahti|banna chahta|banna chahti"
-    r"|interest|hobby|passion|enjoy|love doing|mujhe pasand|acha lagta",
-    re.IGNORECASE,
+_DESIRE_RE = _re.compile(
+    r"\bwant\b|\bwish\b|\bdream\b|\bhope\b|\bplan\b|\bgoal\b|\baspire\b"
+    r"|\bchahta\b|\bchahti\b|\bsapna\b|\bumeed\b|\bsochta\b|\bsochti\b",
+    _re.IGNORECASE,
 )
 
-_SPECIFICITY_RE = re.compile(
+_SPECIFICITY_RE = _re.compile(
     r"drawing|coding|music|cricket|dance|writing|gaming|cooking|design"
     r"|math|science|history|art|sport|youtube|content|video|photo"
     r"|banaya|banai|project|made|built|created|tried|experiment"
     r"|certificate|won|competition|rank|score|marks",
-    re.IGNORECASE,
+    _re.IGNORECASE,
 )
 
-_FAMILY_PRESSURE_RE = re.compile(
+_FAMILY_PRESSURE_RE = _re.compile(
     r"papa|mummy|mom|dad|parents|ghar|family|bolte|bolti|force|pressure"
     r"|chahte hain|chahti hain|expect|they want|unhe chahiye",
-    re.IGNORECASE,
+    _re.IGNORECASE,
 )
 
 
 def _score_message(content: str) -> int:
-    """Score a single message for identity signal richness. Max 5 points."""
     score = 0
     if _EMOTIONAL_SIGNAL_RE.search(content):
         score += 1
@@ -312,38 +339,28 @@ def _score_message(content: str) -> int:
 
 
 def is_ready_for_darpan(history: list) -> bool:
-    """
-    Signal-based readiness gate. Fires earlier for rich inputs, later for sparse ones.
-    Minimum: 3 user messages with cumulative signal score >= 5.
-    Hard fallback: 5+ substantive user messages is always enough regardless of score.
-    """
     user_msgs = [m for m in history if m["role"] == "user"]
     if len(user_msgs) < 3:
         return False
-
     total_score = sum(_score_message(m["content"]) for m in user_msgs)
     if total_score >= 5:
         return True
-
     if len(user_msgs) >= 5:
         substantive = sum(1 for m in user_msgs if len(m["content"]) > 40)
         return substantive >= 4
-
     return False
 
 
-# Micro-observation extractor - deterministic behavioral signal detection, zero model cost
-
-_HEDGE_RE = re.compile(
+_HEDGE_RE = _re.compile(
     r"\bbut\b|\bactually\b|\bi mean\b|\bi don'?t know\b|\bmaybe\b|\bsort of\b"
     r"|\bkind of\b|\bnot sure\b|\bpata nahi\b|\bshayad\b|\blagta hai\b",
-    re.IGNORECASE,
+    _re.IGNORECASE,
 )
 
-_ENTHUSIASM_RE = re.compile(
+_ENTHUSIASM_RE = _re.compile(
     r"!|\byaar\b|\bomg\b|\bwow\b|\bhaha\b|\blol\b|\bso cool\b|\blovee\b"
     r"|\bbahut acha\b|\bbohot acha\b|\bkya baat\b",
-    re.IGNORECASE,
+    _re.IGNORECASE,
 )
 
 _CONFIDENCE_MEDIUM = "medium"
@@ -359,12 +376,6 @@ def _obs_confidence(signal_count: int, msg_count: int, recurrences: int) -> str:
 
 
 def extract_micro_observations(history: list) -> list[str]:
-    """
-    Detect behavioral patterns in conversation history without any model call.
-    Returns medium/high confidence observations only, in priority order:
-    topic recurrence, pacing change, hedging, enthusiasm shift, family pressure.
-    Only medium/high confidence observations are returned to avoid noise.
-    """
     user_msgs = [m for m in history if m["role"] == "user"]
     n = len(user_msgs)
     if n < 3:
@@ -373,7 +384,6 @@ def extract_micro_observations(history: list) -> list[str]:
     observations = []
     recent = user_msgs[-5:]
 
-    # Topic recurrence: a non-stop word appearing 3+ times is almost never accidental
     if n >= 4:
         stop_words = {
             "the",
@@ -414,7 +424,7 @@ def extract_micro_observations(history: list) -> list[str]:
             "iska",
             "uska",
             "kuch",
-            "koyi",
+            "koi",
             "waise",
             "like",
             "dont",
@@ -448,7 +458,6 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
                 observations.append((text, conf))
 
-    # Pacing change: message length growing = opening up, shrinking = pulling back
     lengths = [len(m["content"]) for m in recent]
     if len(lengths) >= 3:
         if lengths[-1] > lengths[0] * 1.6:
@@ -468,7 +477,6 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
             )
 
-    # Hedging: pulling back before committing to a statement
     hedge_count = sum(1 for m in recent if _HEDGE_RE.search(m["content"]))
     if hedge_count >= 2:
         conf = _obs_confidence(hedge_count, n, hedge_count)
@@ -477,7 +485,6 @@ def extract_micro_observations(history: list) -> list[str]:
                 ("You keep almost saying something, then pulling back a little.", conf)
             )
 
-    # Enthusiasm shift: energy changes on specific topics
     enthusiasm_count = sum(1 for m in recent if _ENTHUSIASM_RE.search(m["content"]))
     if enthusiasm_count >= 2:
         conf = _obs_confidence(enthusiasm_count, n, enthusiasm_count)
@@ -489,7 +496,6 @@ def extract_micro_observations(history: list) -> list[str]:
                 )
             )
 
-    # Family pressure recurrence: they keep bringing it back unprompted
     family_count = sum(1 for m in user_msgs if _FAMILY_PRESSURE_RE.search(m["content"]))
     if family_count >= 3:
         conf = _obs_confidence(family_count, n, family_count)

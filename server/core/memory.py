@@ -6,8 +6,14 @@ from datetime import date, datetime
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUDENTS_DIR = os.path.join(BASE_DIR, "students/")
 
+# Compression constants
+# When stored history reaches this length, trigger a rolling summary.
+COMPRESSION_THRESHOLD = 40
+# How many of the oldest messages to compress into a summary block.
+COMPRESS_COUNT = 20
 
-# ── Path helpers ──────────────────────────────────────────────────────────────
+
+# Path helpers
 
 
 def _path_by_uid(name: str, grade: int, uid: str) -> str:
@@ -18,26 +24,23 @@ def _path_by_username(username: str) -> str:
     return os.path.join(STUDENTS_DIR, f"u_{username.lower()}.json")
 
 
-# ── PIN hashing (FIX #4: bcrypt replaces bare SHA-256) ───────────────────────
+# PIN hashing
 
 
 def hash_pin(pin: str) -> str:
-    """Returns a bcrypt hash string. Includes salt automatically."""
     return bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_pin(pin: str, pin_hash: str) -> bool:
-    """Works with both new bcrypt hashes and old SHA-256 hashes (migration path)."""
     try:
         return bcrypt.checkpw(pin.encode(), pin_hash.encode())
     except Exception:
-        # Legacy SHA-256 fallback so existing accounts don't break
         import hashlib
 
         return hashlib.sha256(pin.encode()).hexdigest() == pin_hash
 
 
-# ── Username lookups ──────────────────────────────────────────────────────────
+# Username lookups
 
 
 def username_exists(username: str) -> bool:
@@ -52,7 +55,7 @@ def load_by_username(username: str):
     return None
 
 
-# ── Legacy uid-based lookup ───────────────────────────────────────────────────
+# Legacy uid-based lookup
 
 
 def load_student(name: str, grade: int, uid: str):
@@ -66,11 +69,11 @@ def load_student(name: str, grade: int, uid: str):
     return None
 
 
-# ── Save ──────────────────────────────────────────────────────────────────────
+# Save (atomic)
 
 
 def save_student(profile: dict):
-    """Atomic write - temp file + os.replace prevents corruption on interrupt."""
+    """Atomic write — temp file + os.replace prevents corruption on interrupt."""
     os.makedirs(STUDENTS_DIR, exist_ok=True)
     if profile.get("username"):
         path = _path_by_username(profile["username"])
@@ -82,7 +85,7 @@ def save_student(profile: dict):
     os.replace(tmp, path)
 
 
-# ── Create ────────────────────────────────────────────────────────────────────
+# Create
 
 
 def create_new_profile(
@@ -99,7 +102,7 @@ def create_new_profile(
         "created_at": str(date.today()),
         "last_session": str(date.today()),
         "session_count": 0,
-        "darpan_run": False,  # FIX #8: tracks whether Darpan has been called
+        "darpan_run": False,
         "identity_current": {},
         "identity_history": [],
         "futures_generated": [],
@@ -107,10 +110,13 @@ def create_new_profile(
         "aawaz_history": [],
         "language_preference": "hinglish",
         "micro_observations": [],
+        # Rolling summary: compressed digest of older conversation turns.
+        # Initialised as empty string; populated by compress_history().
+        "context_summary": "",
     }
 
 
-# ── Conversation helpers ──────────────────────────────────────────────────────
+# Conversation helpers
 
 
 def add_message(profile: dict, role: str, content: str) -> dict:
@@ -123,22 +129,89 @@ def add_message(profile: dict, role: str, content: str) -> dict:
 
 
 def trim_conversation_history(profile: dict, limit: int = 50) -> dict:
-    """FIX #9: keep only the last `limit` messages to prevent unbounded growth."""
+    """
+    Hard cap retained for emergency safety net.
+    Under normal operation, compress_history() fires before this limit is hit.
+    This is the last-resort guard, not the primary mechanism.
+    """
     if "conversation_history" in profile:
         profile["conversation_history"] = profile["conversation_history"][-limit:]
+    return profile
+
+
+def needs_compression(profile: dict) -> bool:
+    """
+    Returns True when conversation_history is long enough to trigger a rolling summary.
+    Caller should await compress_history() before the next save_student().
+    """
+    return len(profile.get("conversation_history", [])) >= COMPRESSION_THRESHOLD
+
+
+async def compress_history(profile: dict, summarizer_fn) -> dict:
+    """
+    Rolling summary: condense the oldest COMPRESS_COUNT messages into a dense
+    context block, append it to profile['context_summary'], and drop those messages.
+
+    summarizer_fn: async callable(text: str) -> str
+        Injected by main.py so this module stays model-agnostic.
+        Should return a dense 3-5 sentence summary of the conversation excerpt.
+
+    After compression, get_last_n_messages() will prepend the accumulated
+    context_summary so Margdarshak never loses longitudinal signal.
+    """
+    history = profile.get("conversation_history", [])
+    if len(history) < COMPRESS_COUNT:
+        return profile
+
+    to_compress = history[:COMPRESS_COUNT]
+    to_keep = history[COMPRESS_COUNT:]
+
+    # Format oldest messages for summarization
+    raw_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in to_compress)
+
+    try:
+        new_summary = await summarizer_fn(raw_text)
+    except Exception:
+        # If summarization fails, do nothing — better to keep full history
+        # than to silently drop messages without a summary.
+        return profile
+
+    existing_summary = profile.get("context_summary", "").strip()
+    if existing_summary:
+        profile["context_summary"] = existing_summary + " | " + new_summary.strip()
+    else:
+        profile["context_summary"] = new_summary.strip()
+
+    profile["conversation_history"] = to_keep
     return profile
 
 
 def get_last_n_messages(profile: dict, n: int = 5) -> list:
     """
     Returns last n messages from conversation_history.
-    Also prepends a summary of aawaz onboarding history so Margdarshak
-    has context from the very first conversation - the richest identity signal.
+
+    Prepends two context blocks (in order of richness):
+    1. context_summary — compressed digest of older turns (rolling summary)
+    2. aawaz onboarding messages — the richest early identity signal
+
+    This guarantees Margdarshak has full longitudinal context regardless of
+    how many sessions the student has had.
     """
+    result = []
+
+    # 1. Rolling summary of older turns (if compression has fired)
+    summary = profile.get("context_summary", "").strip()
+    if summary:
+        result.append(
+            {
+                "role": "context",
+                "content": f"[Summary of earlier conversation]: {summary}",
+            }
+        )
+
+    # 2. Onboarding transcript (Aawaz turns)
     aawaz = profile.get("aawaz_history", [])
     aawaz_user_msgs = [m for m in aawaz if m.get("role") == "user"]
-
-    result = []
     if aawaz_user_msgs:
         combined = " | ".join(m["content"] for m in aawaz_user_msgs[:6])
         result.append(
@@ -148,6 +221,7 @@ def get_last_n_messages(profile: dict, n: int = 5) -> list:
             }
         )
 
+    # 3. Recent messages
     if "conversation_history" in profile:
         recent = [
             {"role": m["role"], "content": m["content"]}
@@ -158,7 +232,7 @@ def get_last_n_messages(profile: dict, n: int = 5) -> list:
     return result
 
 
-# ── Identity delta - the longitudinal moat ────────────────────────────────────
+# Identity delta and callback helpers
 
 
 def _semantic_similarity(a: str, b: str) -> float:
@@ -213,9 +287,7 @@ def get_identity_delta(old: dict, new: dict) -> dict:
     if not old or not new:
         return {"changed": [], "stable": [], "contradictions": []}
 
-    changed = []
-    stable = []
-    contradictions = []
+    changed, stable, contradictions = [], [], []
 
     scalar_fields = ["thinking_style", "energy_signature", "family_pressure_map"]
     for field in scalar_fields:
@@ -244,8 +316,7 @@ def get_identity_delta(old: dict, new: dict) -> dict:
 
     old_fears = set(x.lower() for x in old.get("active_fears", []))
     new_values = set(x.lower() for x in new.get("core_values", []))
-    overlap = old_fears & new_values
-    for item in overlap:
+    for item in old_fears & new_values:
         contradictions.append(
             f"'{item}' was an active fear last session but appears as a core value now"
         )
@@ -296,7 +367,7 @@ def get_identity_callback(profile: dict) -> str | None:
     return None
 
 
-# ── Micro-observation helpers ─────────────────────────────────────────────────
+# Micro-observation helpers
 
 
 def add_micro_observation(profile: dict, observation: str) -> dict:

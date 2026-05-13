@@ -1,12 +1,16 @@
+import copy
+import json
+import logging
 import os
 import re
-import json
-import copy
+
 import ollama
-from google import genai
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
+
+logger = logging.getLogger("bhavishya.simulator")
 
 _CLOUD_MODEL = "gemma-4-26b-a4b-it"
 _OLLAMA_MODEL = "gemma4:e4b"
@@ -129,6 +133,37 @@ _FALLBACK_FUTURES = {
 }
 
 
+# Initialisation
+
+
+def _load_prompt() -> str:
+    global _PROMPT_CACHE
+    if _PROMPT_CACHE is None:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base, "prompts", "simulator_prompt.txt")
+        with open(path, encoding="utf-8") as f:
+            _PROMPT_CACHE = f.read()
+    return _PROMPT_CACHE
+
+
+def init_client() -> None:
+    """Pre-warm at startup. Safe to call multiple times."""
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        logger.info("[SIMULATOR] Gemini client initialised.")
+
+
+def _get_client() -> genai.Client:
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    return _GEMINI_CLIENT
+
+
+# Post-processing helpers
+
+
 def _get_fallback_futures(identity_json: dict) -> dict:
     thinking = identity_json.get("thinking_style", "").lower()
     energy = identity_json.get("energy_signature", "").lower()
@@ -152,23 +187,6 @@ def _get_fallback_futures(identity_json: dict) -> dict:
     return _FALLBACK_FUTURES
 
 
-def _load_prompt() -> str:
-    global _PROMPT_CACHE
-    if _PROMPT_CACHE is None:
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        path = os.path.join(base, "prompts", "simulator_prompt.txt")
-        with open(path, encoding="utf-8") as f:
-            _PROMPT_CACHE = f.read()
-    return _PROMPT_CACHE
-
-
-def _get_client() -> genai.Client:
-    global _GEMINI_CLIENT
-    if _GEMINI_CLIENT is None:
-        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-    return _GEMINI_CLIENT
-
-
 def _fix_narrative_length(futures: list) -> list:
     for future in futures:
         narrative = future.get("narrative_2031", "")
@@ -185,18 +203,16 @@ def _fix_narrative_length(futures: list) -> list:
 
 
 def _fill_missing_fields(futures: list) -> list:
-    """
-    Guarantee every field exists so frontend never crashes.
-    FIX #12: coerce salary to int (model sometimes returns a string placeholder).
-    """
+    """Guarantee every field exists so frontend never crashes."""
     for future in futures:
         for field in _REQUIRED_FUTURE_FIELDS:
             if field not in future:
-                if field == "annual_salary_2031_inr":
-                    future[field] = 0
-                else:
-                    future[field] = "Information unavailable."
-        # FIX #12: type coercion even if the field was present
+                future[field] = (
+                    0
+                    if field == "annual_salary_2031_inr"
+                    else "Information unavailable."
+                )
+        # Coerce salary to int (model sometimes returns string placeholder)
         salary = future.get("annual_salary_2031_inr")
         if isinstance(salary, str):
             try:
@@ -208,9 +224,20 @@ def _fill_missing_fields(futures: list) -> list:
     return futures
 
 
+# Core logic
+
+
 def run_simulator(
-    identity_json: dict, grade: int, session_count: int, career_data: list
+    identity_json: dict,
+    grade: int,
+    session_count: int,
+    career_data: list,
 ) -> dict:
+    """
+    Synchronous entry point — called via asyncio.to_thread from the FastAPI route.
+
+    JSON mode means response.text is already valid JSON; no regex required.
+    """
     system_prompt = _load_prompt()
 
     bridge_parts = []
@@ -237,7 +264,6 @@ def run_simulator(
     )
 
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
-    raw = ""
 
     try:
         if mode == "cloud":
@@ -246,10 +272,13 @@ def run_simulator(
                 contents=user_msg,
                 config={
                     "system_instruction": system_prompt,
+                    # JSON mode: structurally constrains output to valid JSON.
+                    # No regex extraction; json.loads() runs directly on response.text.
+                    "response_mime_type": "application/json",
                     "http_options": {"timeout": 45000},
                 },
             )
-            raw = response.text.strip()
+            result = json.loads(response.text)
         else:
             response = ollama.chat(
                 model=_OLLAMA_MODEL,
@@ -257,34 +286,34 @@ def run_simulator(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
                 ],
+                format="json",
             )
-            raw = response["message"]["content"].strip()
-
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            raise ValueError("No JSON object found in simulator response.")
-        result = json.loads(match.group(0))
+            result = json.loads(response["message"]["content"])
 
         if "error" in result:
-            print(f"[SIMULATOR/{mode.upper()}] Model returned error: {result['error']}")
+            logger.warning(
+                f"[SIMULATOR/{mode.upper()}] Model returned error: {result['error']}"
+            )
             return _get_fallback_futures(identity_json)
 
         futures = result.get("futures", [])
         if len(futures) != 3:
-            print(f"[SIMULATOR/{mode.upper()}] Expected 3 futures, got {len(futures)}")
+            logger.warning(
+                f"[SIMULATOR/{mode.upper()}] Expected 3 futures, got {len(futures)}"
+            )
             return _get_fallback_futures(identity_json)
 
         types_present = {f.get("type") for f in futures}
         if types_present != _EXPECTED_TYPES:
-            print(f"[SIMULATOR/{mode.upper()}] Wrong types: {types_present}")
+            logger.warning(f"[SIMULATOR/{mode.upper()}] Wrong types: {types_present}")
             return _get_fallback_futures(identity_json)
 
         result["futures"] = _fill_missing_fields(_fix_narrative_length(futures))
         return result
 
     except json.JSONDecodeError as e:
-        print(f"[SIMULATOR/{mode.upper()}] JSON parse failed: {e} | raw: {raw[:200]}")
+        logger.error(f"[SIMULATOR/{mode.upper()}] JSON parse failed: {e}")
         return _get_fallback_futures(identity_json)
     except Exception as e:
-        print(f"[SIMULATOR/{mode.upper()}] Error: {e}")
+        logger.error(f"[SIMULATOR/{mode.upper()}] Unexpected error: {e}")
         return _get_fallback_futures(identity_json)

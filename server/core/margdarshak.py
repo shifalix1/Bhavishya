@@ -1,11 +1,15 @@
+import json
+import logging
 import os
 import re
-import json
+
 import ollama
-from google import genai
 from dotenv import load_dotenv
+from google import genai
 
 load_dotenv()
+
+logger = logging.getLogger("bhavishya.margdarshak")
 
 _CLOUD_MODEL = "gemma-4-26b-a4b-it"
 _OLLAMA_MODEL = "gemma4:e4b"
@@ -20,6 +24,9 @@ _HEAVY_SIGNAL_RE = re.compile(
 )
 
 
+# Initialisation
+
+
 def _load_prompt() -> str:
     global _PROMPT_CACHE
     if _PROMPT_CACHE is None:
@@ -30,11 +37,22 @@ def _load_prompt() -> str:
     return _PROMPT_CACHE
 
 
+def init_client() -> None:
+    """Pre-warm at startup. Safe to call multiple times."""
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        logger.info("[MARGDARSHAK] Gemini client initialised.")
+
+
 def _get_client() -> genai.Client:
     global _GEMINI_CLIENT
     if _GEMINI_CLIENT is None:
         _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     return _GEMINI_CLIENT
+
+
+# Core logic
 
 
 def run_margdarshak(
@@ -45,14 +63,11 @@ def run_margdarshak(
     micro_observation: str | None = None,
     identity_callback: str | None = None,
     career_data: list | None = None,
-    # FIX #13: caller passes total bhavishya turns from the FULL conversation_history,
-    # not from the trimmed `history` slice. This prevents the identity reveal re-firing
-    # after the 5-message window drops the earlier bhavishya message.
     total_bhavishya_turns: int = 0,
 ) -> tuple[str, bool]:
     """
+    Synchronous entry point — called via asyncio.to_thread from the FastAPI route.
     Returns (response_text, is_fallback).
-    is_fallback is True only when both cloud and Ollama fail.
     """
     base_prompt = _load_prompt()
 
@@ -64,7 +79,6 @@ def run_margdarshak(
     )
     system_prompt = base_prompt + behavior_addendum
 
-    # FIX #13: use total_bhavishya_turns (from full history) not the trimmed history slice
     is_first_response = total_bhavishya_turns == 0
 
     context_lines = [
@@ -98,6 +112,7 @@ def run_margdarshak(
             "This one should be warmer and lighter. One idea, gently. Intelligence needs breathing room."
         )
 
+    # Micro-observation and memory callback are mutually exclusive per turn
     if identity_callback and micro_observation:
         micro_observation = None
 
@@ -158,7 +173,7 @@ def run_margdarshak(
             return response["message"]["content"].strip(), False
 
     except Exception as e:
-        print(f"[MARGDARSHAK/{mode.upper()}] Error: {e}")
+        logger.error(f"[MARGDARSHAK/{mode.upper()}] Error: {e}")
         if language == "english":
             fallback = "Give me a second to think about that. What you're asking matters - let's go slow."
         else:
