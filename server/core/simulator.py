@@ -41,8 +41,6 @@ _NON_TECH_SIGNALS = {
     "teach",
 }
 
-# Generic fallback - fires only when both cloud and Ollama fail.
-# Structurally complete so frontend never crashes on a missing field.
 _FALLBACK_FUTURES = {
     "futures": [
         {
@@ -172,7 +170,6 @@ def _get_client() -> genai.Client:
 
 
 def _fix_narrative_length(futures: list) -> list:
-    # Trim narratives over 250 words at the nearest sentence boundary.
     for future in futures:
         narrative = future.get("narrative_2031", "")
         if not narrative:
@@ -188,11 +185,26 @@ def _fix_narrative_length(futures: list) -> list:
 
 
 def _fill_missing_fields(futures: list) -> list:
-    # Guarantee every field exists so frontend never crashes on a missing key.
+    """
+    Guarantee every field exists so frontend never crashes.
+    FIX #12: coerce salary to int (model sometimes returns a string placeholder).
+    """
     for future in futures:
         for field in _REQUIRED_FUTURE_FIELDS:
             if field not in future:
-                future[field] = "Information unavailable."
+                if field == "annual_salary_2031_inr":
+                    future[field] = 0
+                else:
+                    future[field] = "Information unavailable."
+        # FIX #12: type coercion even if the field was present
+        salary = future.get("annual_salary_2031_inr")
+        if isinstance(salary, str):
+            try:
+                future["annual_salary_2031_inr"] = int(
+                    re.sub(r"[^\d]", "", salary) or "0"
+                )
+            except (ValueError, TypeError):
+                future["annual_salary_2031_inr"] = 0
     return futures
 
 
@@ -201,7 +213,6 @@ def run_simulator(
 ) -> dict:
     system_prompt = _load_prompt()
 
-    # Surface the sharpest identity signals explicitly for the unseen_door anchor.
     bridge_parts = []
     if identity_json.get("thinking_style"):
         bridge_parts.append(f"thinking: {identity_json['thinking_style']}")
@@ -263,7 +274,6 @@ def run_simulator(
             print(f"[SIMULATOR/{mode.upper()}] Expected 3 futures, got {len(futures)}")
             return _get_fallback_futures(identity_json)
 
-        # Validate all three types are present - count check alone is not enough.
         types_present = {f.get("type") for f in futures}
         if types_present != _EXPECTED_TYPES:
             print(f"[SIMULATOR/{mode.upper()}] Wrong types: {types_present}")

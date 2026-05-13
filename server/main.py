@@ -1,11 +1,16 @@
+import asyncio
 import logging
 import os
 import re
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from dotenv import load_dotenv
 
@@ -44,14 +49,19 @@ from core.memory import (
     get_latest_observation,
     get_identity_delta,
     get_identity_callback,
+    trim_conversation_history,
 )
 from core.language import detect_language
 from core.careers import get_careers_for_identity
 
-app = FastAPI(title="Bhavishya API", version="2.2.0")
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
 
-# Read allowed origins from env for deployment flexibility.
-# Falls back to localhost dev ports if not set.
+app = FastAPI(title="Bhavishya API", version="2.3.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
 _CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(
@@ -68,7 +78,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── X-API-Key auth middleware ─────────────────────────────────────────────────
+# Store BHAVISHYA_API_KEY in .env. All non-health endpoints require this header.
+_API_KEY = os.getenv("BHAVISHYA_API_KEY", "")
+
+UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if request.url.path in UNPROTECTED_PATHS:
+        return await call_next(request)
+    if not _API_KEY:
+        # Dev mode: no key configured → allow all (log a warning)
+        logger.warning("BHAVISHYA_API_KEY not set - running unauthenticated!")
+        return await call_next(request)
+    incoming = request.headers.get("X-API-Key", "")
+    if incoming != _API_KEY:
+        return JSONResponse(
+            status_code=401, content={"detail": "Invalid or missing API key."}
+        )
+    return await call_next(request)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
+_CONV_HISTORY_LIMIT = 50  # fix #9: cap stored messages
 
 
 def validate_username(username: str) -> None:
@@ -84,14 +119,7 @@ def validate_pin(pin: str) -> None:
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
 
 
-def get_or_create_student(name: str, grade: int, uid: str) -> dict:
-    profile = load_student(name, grade, uid)
-    if not profile:
-        profile = create_new_profile(name, grade, uid)
-    return profile
-
-
-# Request models
+# ── Request models ────────────────────────────────────────────────────────────
 
 
 class RegisterRequest(BaseModel):
@@ -149,14 +177,10 @@ class AawazChatRequest(BaseModel):
     uid: str
     message: str
     language: Optional[str] = "english"
-    # Anomalies extracted from an uploaded image by /aawaz/transcribe.
-    # Frontend sends this once on the first chat turn after an image upload.
-    # Backend persists it so subsequent turns don't need to re-send it.
     image_anomalies: Optional[str] = None
 
 
-# Routers
-
+# ── Routers ───────────────────────────────────────────────────────────────────
 auth_router = APIRouter(prefix="", tags=["auth"])
 aawaz_router = APIRouter(prefix="/aawaz", tags=["aawaz"])
 core_router = APIRouter(prefix="", tags=["core"])
@@ -167,15 +191,16 @@ async def health():
     return {
         "status": "ok",
         "model": os.getenv("BHAVISHYA_MODE", "cloud"),
-        "version": "2.2.0",
+        "version": "2.3.0",
     }
 
 
-# Auth routes
+# ── Auth routes ───────────────────────────────────────────────────────────────
 
 
 @auth_router.post("/register")
-async def register(req: RegisterRequest):
+@limiter.limit("10/minute")
+async def register(req: RegisterRequest, request: Request):
     validate_username(req.username)
     validate_pin(req.pin)
 
@@ -210,7 +235,8 @@ async def register(req: RegisterRequest):
 
 
 @auth_router.post("/login")
-async def login(req: LoginRequest):
+@limiter.limit("20/minute")
+async def login(req: LoginRequest, request: Request):
     validate_username(req.username)
     validate_pin(req.pin)
 
@@ -242,7 +268,8 @@ async def login(req: LoginRequest):
 
 
 @auth_router.post("/onboard")
-async def onboard(req: OnboardRequest):
+@limiter.limit("10/minute")
+async def onboard(req: OnboardRequest, request: Request):
     """Legacy onboard flow kept for backward compatibility."""
     profile = load_student(req.name, req.grade, req.uid)
     is_returning = profile is not None
@@ -262,11 +289,12 @@ async def onboard(req: OnboardRequest):
     }
 
 
-# Aawaz routes
+# ── Aawaz routes ──────────────────────────────────────────────────────────────
 
 
 @aawaz_router.post("/transcribe")
-async def aawaz_transcribe(req: AawazTranscribeRequest):
+@limiter.limit("10/minute")
+async def aawaz_transcribe(req: AawazTranscribeRequest, request: Request):
     if not req.audio_b64 and not req.image_b64 and not req.text_fallback:
         raise HTTPException(status_code=400, detail="No input provided.")
 
@@ -294,8 +322,16 @@ async def aawaz_transcribe(req: AawazTranscribeRequest):
 
 
 @aawaz_router.post("/chat")
-async def aawaz_chat(req: AawazChatRequest):
-    profile = get_or_create_student(req.name, req.grade, req.uid)
+@limiter.limit("10/minute")
+async def aawaz_chat(req: AawazChatRequest, request: Request):
+    # FIX #6: do NOT auto-create profile here. Require explicit register/onboard first.
+    profile = load_student(req.name, req.grade, req.uid)
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail="Student profile not found. Please register or onboard first.",
+        )
+
     history = profile.get("aawaz_history", [])
 
     logger.info(
@@ -304,8 +340,6 @@ async def aawaz_chat(req: AawazChatRequest):
         f"lang={req.language}"
     )
 
-    # Use freshly sent anomalies if present, otherwise read from profile.
-    # Frontend only needs to send image_anomalies once; we persist and replay it.
     image_anomalies = req.image_anomalies
     if image_anomalies:
         profile["image_anomalies"] = image_anomalies
@@ -338,11 +372,15 @@ async def aawaz_chat(req: AawazChatRequest):
 
     save_student(profile)
 
-    ready = is_ready_for_darpan(history)
+    # FIX #8: only signal readiness if darpan hasn't run yet
+    already_run = profile.get("darpan_run", False)
+    ready = False
     combined_input = None
-    if ready:
-        user_msgs = [m["content"] for m in history if m["role"] == "user"]
-        combined_input = "\n\n".join(user_msgs)
+    if not already_run:
+        ready = is_ready_for_darpan(history)
+        if ready:
+            user_msgs = [m["content"] for m in history if m["role"] == "user"]
+            combined_input = "\n\n".join(user_msgs)
 
     return {
         "response": response,
@@ -353,20 +391,22 @@ async def aawaz_chat(req: AawazChatRequest):
     }
 
 
-# Core routes
+# ── Core routes ───────────────────────────────────────────────────────────────
 
 
 @core_router.post("/session")
-async def run_session(req: SessionRequest):
-    profile = get_or_create_student(req.name, req.grade, req.uid)
+@limiter.limit("10/minute")
+async def run_session(req: SessionRequest, request: Request):
+    profile = load_student(req.name, req.grade, req.uid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student not found.")
+
     previous_identity = profile.get("identity_current") or None
 
     logger.info(
         f"[SESSION] {req.name} | session #{profile.get('session_count', 0) + 1}"
     )
 
-    # Enrich Darpan's input with behavioral signals observed during onboarding.
-    # Darpan sees the pattern evidence alongside the raw text, which raises confidence.
     enriched_input = req.student_input
     obs = profile.get("micro_observations", [])
     if obs:
@@ -377,7 +417,18 @@ async def run_session(req: SessionRequest):
             + "]"
         )
 
-    identity = run_darpan(enriched_input, req.grade, previous_identity)
+    identity = await asyncio.to_thread(
+        run_darpan, enriched_input, req.grade, previous_identity
+    )
+
+    # FIX #11: warn when darpan output looks like the generic fallback
+    thinking = identity.get("thinking_style", "")
+    conf = identity.get("identity_confidence", 5)
+    if conf <= 3 and "learns by doing" in thinking.lower():
+        logger.warning(
+            f"[DARPAN] Possible generic output for {req.name} - "
+            f"confidence={conf}, thinking_style resembles fallback phrasing."
+        )
 
     delta = (
         get_identity_delta(previous_identity, identity) if previous_identity else None
@@ -390,7 +441,11 @@ async def run_session(req: SessionRequest):
         {"session": profile["session_count"] + 1, "snapshot": identity}
     )
     profile["session_count"] += 1
+    # FIX #8: mark darpan as run so aawaz/chat won't re-trigger
+    profile["darpan_run"] = True
     profile = add_message(profile, "user", req.student_input)
+    # FIX #9: trim conversation history
+    profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
     save_student(profile)
 
     return {
@@ -408,7 +463,8 @@ async def run_session(req: SessionRequest):
 
 
 @core_router.post("/simulate")
-async def simulate(req: SimulateRequest):
+@limiter.limit("5/minute")
+async def simulate(req: SimulateRequest, request: Request):
     profile = load_student(req.name, req.grade, req.uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Student not found.")
@@ -423,7 +479,8 @@ async def simulate(req: SimulateRequest):
 
     logger.info(f"[SIMULATE] {req.name} | session #{profile.get('session_count', 0)}")
 
-    futures = run_simulator(
+    futures = await asyncio.to_thread(
+        run_simulator,
         identity_json=identity,
         grade=profile["grade"],
         session_count=profile.get("session_count", 1),
@@ -445,7 +502,8 @@ async def simulate(req: SimulateRequest):
 
 
 @core_router.post("/chat")
-async def chat(req: ChatRequest):
+@limiter.limit("20/minute")
+async def chat(req: ChatRequest, request: Request):
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
@@ -455,16 +513,13 @@ async def chat(req: ChatRequest):
     language = detect_language(req.question)
     history = get_last_n_messages(profile, n=5)
 
+    # FIX #13: check full conversation_history length, not trimmed history
     bhavishya_turns = sum(
         1
         for m in profile.get("conversation_history", [])
         if m.get("role") == "bhavishya"
     )
 
-    # Delayed signal pacing: surface observations and callbacks every 3rd turn.
-    # Instant pattern recognition reads as AI. A beat of delay reads as human.
-    # Exception: returning students (session_count > 1) get the callback on their
-    # very first chat message so longitudinal memory fires the moment they re-enter.
     is_returning_first_chat = (
         profile.get("session_count", 0) > 1 and bhavishya_turns == 0
     )
@@ -481,8 +536,8 @@ async def chat(req: ChatRequest):
         f"observation={'yes' if micro_obs else 'no'}"
     )
 
-    # run_margdarshak returns (response_text, is_fallback)
-    response, is_fallback = run_margdarshak(
+    response, is_fallback = await asyncio.to_thread(
+        run_margdarshak,
         question=req.question,
         identity_json=profile["identity_current"],
         history=history,
@@ -490,10 +545,13 @@ async def chat(req: ChatRequest):
         micro_observation=micro_obs,
         identity_callback=callback,
         career_data=career_data,
+        total_bhavishya_turns=bhavishya_turns,  # FIX #13
     )
 
     profile = add_message(profile, "user", req.question)
     profile = add_message(profile, "bhavishya", response)
+    # FIX #9: trim on every chat turn
+    profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
     save_student(profile)
 
     return {
@@ -507,21 +565,9 @@ async def chat(req: ChatRequest):
     }
 
 
-@app.get("/profile/{name}/{grade}/{uid}", tags=["meta"])
-async def get_profile(name: str, grade: int, uid: str):
-    profile = load_student(name, grade, uid)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Student not found.")
-    return profile
-
-
-@app.get("/profile/u/{username}", tags=["meta"])
-async def get_profile_by_username(username: str):
-    """Direct profile fetch by username - used by frontend after login."""
-    profile = load_by_username(username)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Student not found.")
-    return profile
+# FIX #5: /profile endpoints removed. Profile data is only accessible via authenticated
+# /login response. The open GET endpoints exposed pin_hash + full history to anyone.
+# If you need a profile fetch, add it behind login auth with a session token.
 
 
 app.include_router(auth_router)

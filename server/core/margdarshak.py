@@ -13,7 +13,6 @@ _OLLAMA_MODEL = "gemma4:e4b"
 _PROMPT_CACHE: str | None = None
 _GEMINI_CLIENT: genai.Client | None = None
 
-# Compiled once at module load - not per call.
 _HEAVY_SIGNAL_RE = re.compile(
     r"fear|contradict|pressure|sacrifice|cost|honest|hard truth|worry|concern"
     r"|tension|gap|conflict|struggle|difficult|painful",
@@ -46,15 +45,17 @@ def run_margdarshak(
     micro_observation: str | None = None,
     identity_callback: str | None = None,
     career_data: list | None = None,
+    # FIX #13: caller passes total bhavishya turns from the FULL conversation_history,
+    # not from the trimmed `history` slice. This prevents the identity reveal re-firing
+    # after the 5-message window drops the earlier bhavishya message.
+    total_bhavishya_turns: int = 0,
 ) -> tuple[str, bool]:
     """
     Returns (response_text, is_fallback).
     is_fallback is True only when both cloud and Ollama fail.
-    Caller surfaces is_fallback to the frontend for demo transparency.
     """
     base_prompt = _load_prompt()
 
-    # Prevent structural labels from leaking into output.
     behavior_addendum = (
         "\n\nIMPORTANT TONE NOTE: Do NOT use structural headers or numbered labels "
         "like 'VALIDATE FIRST' or 'GAME PLAN' in your actual response. "
@@ -63,8 +64,8 @@ def run_margdarshak(
     )
     system_prompt = base_prompt + behavior_addendum
 
-    # IS_FIRST_RESPONSE drives the identity reveal in the prompt.
-    is_first_response = not any(m.get("role") == "bhavishya" for m in history)
+    # FIX #13: use total_bhavishya_turns (from full history) not the trimmed history slice
+    is_first_response = total_bhavishya_turns == 0
 
     context_lines = [
         f"IS_FIRST_RESPONSE: {'yes' if is_first_response else 'no'}",
@@ -74,8 +75,6 @@ def run_margdarshak(
         f"Last 5 messages: {json.dumps(history, ensure_ascii=False)}",
     ]
 
-    # Low confidence: Darpan had thin signal - ask, don't assert.
-    # High confidence: Darpan had rich signal - speak with conviction.
     confidence = identity_json.get("identity_confidence", 5)
     if confidence <= 4:
         context_lines.append(
@@ -89,8 +88,6 @@ def run_margdarshak(
             "You can reference identity traits with conviction. This is a solid picture."
         )
 
-    # If the previous response went deep (fear/pressure/sacrifice named),
-    # the next one should be warmer. Observations need breathing room after them.
     last_bhavishya = next(
         (m["content"] for m in reversed(history) if m.get("role") == "bhavishya"),
         None,
@@ -101,9 +98,6 @@ def run_margdarshak(
             "This one should be warmer and lighter. One idea, gently. Intelligence needs breathing room."
         )
 
-    # Surface at most one signal per response.
-    # Stacking both makes Bhavishya feel like it is showing off.
-    # Prefer callback for returning students where longitudinal memory is stronger.
     if identity_callback and micro_observation:
         micro_observation = None
 
@@ -121,7 +115,6 @@ def run_margdarshak(
             "Casual and imprecise, the way real memory works. Not a data readout."
         )
 
-    # Slim career data: only honest_reality, parent_frame, ai_disruption.
     if career_data:
         career_context = []
         for c in career_data[:3]:

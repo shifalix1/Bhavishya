@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import ollama
@@ -94,7 +95,9 @@ async def run_aawaz_transcribe(
     parts.append({"text": "\n\n".join(instructions)})
 
     try:
-        response = _get_client().models.generate_content(
+        client = _get_client()
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model=CLOUD_MODEL,
             contents=[{"role": "user", "parts": parts}],
         )
@@ -226,7 +229,9 @@ async def run_aawaz_chat(
 
     if mode == "cloud":
         try:
-            response = _get_client().models.generate_content(
+            client = _get_client()
+            response = await asyncio.to_thread(
+                client.models.generate_content,
                 model=CLOUD_MODEL,
                 contents=contents,
                 config={"system_instruction": system_prompt},
@@ -251,7 +256,9 @@ async def run_aawaz_chat(
                 "content": f"[Student: {name}, Class: {grade}]\n{message}",
             }
         )
-        response = ollama.chat(model=OFFLINE_MODEL, messages=ollama_msgs)
+        response = await asyncio.to_thread(
+            ollama.chat, model=OFFLINE_MODEL, messages=ollama_msgs
+        )
         return _strip_speak_tags(response["message"]["content"].strip())
     except Exception as e:
         raise RuntimeError(f"Aawaz chat failed (cloud + Ollama both down): {e}")

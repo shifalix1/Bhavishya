@@ -1,13 +1,13 @@
 import json
 import os
-import hashlib
+import bcrypt
 from datetime import date, datetime
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUDENTS_DIR = os.path.join(BASE_DIR, "students/")
 
 
-# Path helpers
+# ── Path helpers ──────────────────────────────────────────────────────────────
 
 
 def _path_by_uid(name: str, grade: int, uid: str) -> str:
@@ -18,18 +18,26 @@ def _path_by_username(username: str) -> str:
     return os.path.join(STUDENTS_DIR, f"u_{username.lower()}.json")
 
 
-# PIN hashing
+# ── PIN hashing (FIX #4: bcrypt replaces bare SHA-256) ───────────────────────
 
 
 def hash_pin(pin: str) -> str:
-    return hashlib.sha256(pin.encode()).hexdigest()
+    """Returns a bcrypt hash string. Includes salt automatically."""
+    return bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_pin(pin: str, pin_hash: str) -> bool:
-    return hash_pin(pin) == pin_hash
+    """Works with both new bcrypt hashes and old SHA-256 hashes (migration path)."""
+    try:
+        return bcrypt.checkpw(pin.encode(), pin_hash.encode())
+    except Exception:
+        # Legacy SHA-256 fallback so existing accounts don't break
+        import hashlib
+
+        return hashlib.sha256(pin.encode()).hexdigest() == pin_hash
 
 
-# Username lookups
+# ── Username lookups ──────────────────────────────────────────────────────────
 
 
 def username_exists(username: str) -> bool:
@@ -44,7 +52,7 @@ def load_by_username(username: str):
     return None
 
 
-# Legacy uid-based lookup
+# ── Legacy uid-based lookup ───────────────────────────────────────────────────
 
 
 def load_student(name: str, grade: int, uid: str):
@@ -58,7 +66,7 @@ def load_student(name: str, grade: int, uid: str):
     return None
 
 
-# Save
+# ── Save ──────────────────────────────────────────────────────────────────────
 
 
 def save_student(profile: dict):
@@ -74,7 +82,7 @@ def save_student(profile: dict):
     os.replace(tmp, path)
 
 
-# Create
+# ── Create ────────────────────────────────────────────────────────────────────
 
 
 def create_new_profile(
@@ -91,6 +99,7 @@ def create_new_profile(
         "created_at": str(date.today()),
         "last_session": str(date.today()),
         "session_count": 0,
+        "darpan_run": False,  # FIX #8: tracks whether Darpan has been called
         "identity_current": {},
         "identity_history": [],
         "futures_generated": [],
@@ -101,7 +110,7 @@ def create_new_profile(
     }
 
 
-# Conversation helpers
+# ── Conversation helpers ──────────────────────────────────────────────────────
 
 
 def add_message(profile: dict, role: str, content: str) -> dict:
@@ -110,6 +119,13 @@ def add_message(profile: dict, role: str, content: str) -> dict:
     profile["conversation_history"].append(
         {"role": role, "content": content, "timestamp": str(datetime.now())}
     )
+    return profile
+
+
+def trim_conversation_history(profile: dict, limit: int = 50) -> dict:
+    """FIX #9: keep only the last `limit` messages to prevent unbounded growth."""
+    if "conversation_history" in profile:
+        profile["conversation_history"] = profile["conversation_history"][-limit:]
     return profile
 
 
@@ -124,7 +140,6 @@ def get_last_n_messages(profile: dict, n: int = 5) -> list:
 
     result = []
     if aawaz_user_msgs:
-        # Summarise onboarding in one synthetic message rather than dumping raw history
         combined = " | ".join(m["content"] for m in aawaz_user_msgs[:6])
         result.append(
             {
@@ -143,15 +158,10 @@ def get_last_n_messages(profile: dict, n: int = 5) -> list:
     return result
 
 
-# Identity delta - the longitudinal moat
+# ── Identity delta - the longitudinal moat ────────────────────────────────────
 
 
 def _semantic_similarity(a: str, b: str) -> float:
-    """
-    Word-overlap Jaccard similarity between two strings.
-    Good enough for detecting whether two identity phrases express the same thing
-    without needing embeddings or a model call.
-    """
     if not a or not b:
         return 0.0
     stop = {
@@ -200,12 +210,6 @@ def _semantic_similarity(a: str, b: str) -> float:
 
 
 def get_identity_delta(old: dict, new: dict) -> dict:
-    """
-    Compares two identity snapshots. Returns:
-    - changed: fields whose value meaningfully changed
-    - stable: fields that stayed the same across sessions (these are bedrock truths)
-    - contradictions: specific surface-level contradictions worth surfacing
-    """
     if not old or not new:
         return {"changed": [], "stable": [], "contradictions": []}
 
@@ -235,17 +239,11 @@ def get_identity_delta(old: dict, new: dict) -> dict:
                 removed = old_items - new_items
                 if added or removed:
                     changed.append(
-                        {
-                            "field": field,
-                            "added": list(added),
-                            "removed": list(removed),
-                        }
+                        {"field": field, "added": list(added), "removed": list(removed)}
                     )
 
-    # Detect meaningful contradictions worth surfacing to Margdarshak
     old_fears = set(x.lower() for x in old.get("active_fears", []))
     new_values = set(x.lower() for x in new.get("core_values", []))
-    # If something was a fear and is now a stated value, that is interesting
     overlap = old_fears & new_values
     for item in overlap:
         contradictions.append(
@@ -256,20 +254,12 @@ def get_identity_delta(old: dict, new: dict) -> dict:
 
 
 def get_identity_callback(profile: dict) -> str | None:
-    """
-    Returns a single memory callback string for Margdarshak to optionally reference.
-    Drawn from stable identity fields across sessions. Uses semantic similarity
-    (not exact string match) so phrasing variation across sessions doesn't kill detection.
-    Phrased like a sibling who genuinely remembers - not a system printing a record.
-    Returns None if this is the first session or no stable pattern found.
-    """
     history = profile.get("identity_history", [])
     if len(history) < 2:
         return None
 
     SIMILARITY_THRESHOLD = 0.35
 
-    # Find stable thinking_style across all sessions
     styles = [
         h["snapshot"].get("thinking_style", "")
         for h in history
@@ -281,7 +271,6 @@ def get_identity_callback(profile: dict) -> str | None:
     ):
         return f"I remember this coming up before too: {styles[-1]}"
 
-    # Find stable energy_signature
     energies = [
         h["snapshot"].get("energy_signature", "")
         for h in history
@@ -293,7 +282,6 @@ def get_identity_callback(profile: dict) -> str | None:
     ):
         return f"This reminds me of something from when we first talked: {energies[-1]}"
 
-    # Fall back to any stable core value
     if len(history) >= 2:
         old_values = set(
             x.lower() for x in history[0].get("snapshot", {}).get("core_values", [])
@@ -308,7 +296,7 @@ def get_identity_callback(profile: dict) -> str | None:
     return None
 
 
-# Micro-observation helpers
+# ── Micro-observation helpers ─────────────────────────────────────────────────
 
 
 def add_micro_observation(profile: dict, observation: str) -> dict:
@@ -321,7 +309,6 @@ def add_micro_observation(profile: dict, observation: str) -> dict:
             "session": profile.get("session_count", 0),
         }
     )
-    # Keep last 20 only
     profile["micro_observations"] = profile["micro_observations"][-20:]
     return profile
 
@@ -331,17 +318,14 @@ def get_latest_observation(profile: dict) -> str | None:
     if not obs:
         return None
 
-    # Priority: light behavioral signals first (these create "how did it notice that?")
-    # Heavy signals (family, parents) go last - the student already knows those.
-    # Reversed from naive intuition: the least obvious signals land hardest.
     priority_keywords = [
-        "keeps coming up",  # topic recurrence - lightest, most magical
-        "not sure if you noticed",  # delayed recurrence phrasing
-        "saying a lot more",  # pacing - opening up
-        "something shifted",  # pacing - pulling back
-        "almost saying something",  # hedging
-        "way you write changes",  # enthusiasm shift
-        "family keeps coming",  # heavy - goes last
+        "keeps coming up",
+        "not sure if you noticed",
+        "saying a lot more",
+        "something shifted",
+        "almost saying something",
+        "way you write changes",
+        "family keeps coming",
     ]
     for keyword in priority_keywords:
         for o in reversed(obs):

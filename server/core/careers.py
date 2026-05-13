@@ -1,9 +1,9 @@
 import json
+import logging
 import os
 
-# Semantic bucket map: bridges Darpan natural language -> careers.json identity_tag vocabulary.
-# Keys are words Darpan commonly outputs. Values are the EXACT strings that appear in
-# careers.json identity_tags - verified against actual tag vocabulary (129 careers).
+logger = logging.getLogger("bhavishya.careers")
+
 _SEMANTIC_BUCKETS: dict[str, list[str]] = {
     # Analytical cluster
     "analytical": [
@@ -288,7 +288,7 @@ def load_all_careers() -> list:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(BASE_DIR, "data", "careers.json")
     if not os.path.exists(path):
-        print(f"Error: {path} not found!")
+        logger.error(f"careers.json not found at {path}")
         return []
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -297,11 +297,6 @@ def load_all_careers() -> list:
 
 
 def _expand_to_tags(text: str) -> list[str]:
-    """
-    Convert a Darpan natural language phrase into careers.json identity_tag vocabulary.
-    Checks single words AND bigrams. Falls back to stem partial match.
-    Returns deduplicated list of exact target tag strings from careers.json.
-    """
     words = text.lower().split()
     tags = []
     seen_keys = set()
@@ -309,19 +304,16 @@ def _expand_to_tags(text: str) -> list[str]:
     for i, word in enumerate(words):
         clean = word.strip(".,!?-\u2014\"'")
 
-        # Single word lookup
         if clean in _SEMANTIC_BUCKETS and clean not in seen_keys:
             tags.extend(_SEMANTIC_BUCKETS[clean])
             seen_keys.add(clean)
 
-        # Bigram lookup (e.g. "systems thinking", "pattern recognition")
         if i + 1 < len(words):
             bigram = clean + " " + words[i + 1].strip(".,!?-\u2014\"'")
             if bigram in _SEMANTIC_BUCKETS and bigram not in seen_keys:
                 tags.extend(_SEMANTIC_BUCKETS[bigram])
                 seen_keys.add(bigram)
 
-        # Stem partial match fallback
         if clean not in seen_keys:
             for key in _SEMANTIC_BUCKETS:
                 if (
@@ -333,7 +325,6 @@ def _expand_to_tags(text: str) -> list[str]:
                     seen_keys.add(key)
                     break
 
-    # Deduplicate preserving order
     seen = set()
     result = []
     for t in tags:
@@ -344,12 +335,6 @@ def _expand_to_tags(text: str) -> list[str]:
 
 
 def _score_career(career: dict, expanded_set: set) -> int:
-    """
-    Score a career against the student's expanded tag set.
-    Exact match: 3pts. Partial (substring): 1pt.
-    Multi-word tags like 'visual thinking' and 'pattern recognition' get full
-    credit because _expand_to_tags now outputs the exact careers.json strings.
-    """
     career_tags = career.get("identity_tags", {})
     career_kw = set(
         k.lower()
@@ -373,10 +358,6 @@ def _score_career(career: dict, expanded_set: set) -> int:
 
 
 def get_careers_for_identity(identity: dict, n: int = 5) -> list:
-    """
-    Returns n most relevant careers for a student's identity.
-    Uses corrected bucket vocabulary aligned to careers.json actual tag strings.
-    """
     careers = load_all_careers()
     if not careers:
         return []
@@ -392,20 +373,31 @@ def get_careers_for_identity(identity: dict, n: int = 5) -> list:
         expanded_tags.extend(_expand_to_tags(value))
 
     if not expanded_tags:
+        logger.debug(
+            "get_careers_for_identity: no tags expanded - returning top-n by default"
+        )
         return _slim_careers(careers[:n])
 
     expanded_set = set(expanded_tags)
     scored = [(_score_career(c, expanded_set), c) for c in careers]
     scored.sort(key=lambda x: x[0], reverse=True)
+
+    # FIX #7: log when top career gets a low score (tag expansion probably missed)
+    if scored and scored[0][0] == 0:
+        logger.debug(
+            f"Expanded tags: {expanded_set} | top career: {scored[0][1].get('name')} | score: 0 - "
+            "no tag matches found; check _SEMANTIC_BUCKETS coverage"
+        )
+    elif scored:
+        logger.debug(
+            f"Expanded tags (sample): {list(expanded_set)[:5]} | "
+            f"top career: {scored[0][1].get('name')} | score: {scored[0][0]}"
+        )
+
     return _slim_careers([c for _, c in scored[:n]])
 
 
 def _slim_careers(careers: list) -> list:
-    """
-    Returns only what the simulator and Margdarshak actually need.
-    Keeps salary inside indian_reality, honest_reality, parent_frame, ai_disruption.
-    Drops pathways/certifications to save tokens.
-    """
     keep = {
         "id",
         "name",

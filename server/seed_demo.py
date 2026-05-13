@@ -25,7 +25,20 @@ from datetime import date, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.memory import create_new_profile, save_student, add_micro_observation
+from core.memory import (
+    create_new_profile,
+    save_student,
+    add_micro_observation,
+    _path_by_username,
+)
+
+
+def _delete_if_exists(username: str) -> None:
+    """Remove stale demo JSON so re-runs always produce fresh bcrypt hashes."""
+    path = _path_by_username(username)
+    if os.path.exists(path):
+        os.remove(path)
+        print(f"  Removed stale file: {path}")
 
 
 def _now() -> str:
@@ -33,6 +46,7 @@ def _now() -> str:
 
 
 def seed_aryan():
+    _delete_if_exists("demo_aryan")
     profile = create_new_profile(
         name="Aryan",
         grade=11,
@@ -87,25 +101,70 @@ def seed_aryan():
 
     profile["aawaz_history"] = [
         {"role": "user", "content": "papa bol rahe hain JEE ki coaching join karo"},
-        {"role": "aawaz", "content": "Family hamesha safe option chahti hai, I get it. Par sach bata - jab koi nahi dekh raha hota, toh tu kya karta hai?"},
-        {"role": "user", "content": "main usually kuch banata hoon. arduino pe projects ya phir phone repair karta hoon dosto ke liye. kal ek speaker fix kiya"},
-        {"role": "aawaz", "content": "Speaker fix kiya - that's not random tinkering. Woh specific diagnosis tha. Tune kya dekha tha jo baki ne miss kiya?"},
-        {"role": "user", "content": "dust tha woofer mein, obvious tha par nobody checked. mujhe ye cheezein dikhti hain jaldi"},
-        {"role": "aawaz", "content": "Aur engineering mein kya lagta hai tujhe? Woh feeling jo speaker fix karte waqt aayi, woh wahan bhi aayegi?"},
-        {"role": "user", "content": "pata nahi yaar. coding bhi try ki hai, thoda boring lagi theory mein. hardware zyada interesting hai"},
-        {"role": "aawaz", "content": "Hardware interesting hai - that's already more specific than most people your age know about themselves. Kab se hai yeh?"},
+        {
+            "role": "aawaz",
+            "content": "Family hamesha safe option chahti hai, I get it. Par sach bata - jab koi nahi dekh raha hota, toh tu kya karta hai?",
+        },
+        {
+            "role": "user",
+            "content": "main usually kuch banata hoon. arduino pe projects ya phir phone repair karta hoon dosto ke liye. kal ek speaker fix kiya",
+        },
+        {
+            "role": "aawaz",
+            "content": "Speaker fix kiya - that's not random tinkering. Woh specific diagnosis tha. Tune kya dekha tha jo baki ne miss kiya?",
+        },
+        {
+            "role": "user",
+            "content": "dust tha woofer mein, obvious tha par nobody checked. mujhe ye cheezein dikhti hain jaldi",
+        },
+        {
+            "role": "aawaz",
+            "content": "Aur engineering mein kya lagta hai tujhe? Woh feeling jo speaker fix karte waqt aayi, woh wahan bhi aayegi?",
+        },
+        {
+            "role": "user",
+            "content": "pata nahi yaar. coding bhi try ki hai, thoda boring lagi theory mein. hardware zyada interesting hai",
+        },
+        {
+            "role": "aawaz",
+            "content": "Hardware interesting hai - that's already more specific than most people your age know about themselves. Kab se hai yeh?",
+        },
     ]
 
     profile["conversation_history"] = [
-        {"role": "user", "content": "main hardware mein jaana chahta hoon but papa bol rahe hain software hi karo, zyada scope hai", "timestamp": _now()},
-        {"role": "bhavishya", "content": "Jo cheez tune speaker mein dekhi - woh diagnostic instinct hai. Hardware aur software dono mein lagti hai. Embedded systems engineers exactly yahi karte hain: hardware aur software ka intersection. Scope waali baat pe papa galat nahi hain, but scope sirf ek cheez mein nahi hoti.", "timestamp": _now()},
-        {"role": "user", "content": "embedded systems kya hota hai exactly", "timestamp": _now()},
-        {"role": "bhavishya", "content": "Woh speaker jo tune fix kiya? Ek embedded system tha. Car brake sensors, medical devices, satellite components - sab embedded. Tere haath ka kaam already is space mein hai. Ek kaam kar: 'Embedded Systems Essentials' YouTube pe dekh, ek raat mein clear ho jaayega.", "timestamp": _now()},
+        {
+            "role": "user",
+            "content": "main hardware mein jaana chahta hoon but papa bol rahe hain software hi karo, zyada scope hai",
+            "timestamp": _now(),
+        },
+        {
+            "role": "bhavishya",
+            "content": "Jo cheez tune speaker mein dekhi - woh diagnostic instinct hai. Hardware aur software dono mein lagti hai. Embedded systems engineers exactly yahi karte hain: hardware aur software ka intersection. Scope waali baat pe papa galat nahi hain, but scope sirf ek cheez mein nahi hoti.",
+            "timestamp": _now(),
+        },
+        {
+            "role": "user",
+            "content": "embedded systems kya hota hai exactly",
+            "timestamp": _now(),
+        },
+        {
+            "role": "bhavishya",
+            "content": "Woh speaker jo tune fix kiya? Ek embedded system tha. Car brake sensors, medical devices, satellite components - sab embedded. Tere haath ka kaam already is space mein hai. Ek kaam kar: 'Embedded Systems Essentials' YouTube pe dekh, ek raat mein clear ho jaayega.",
+            "timestamp": _now(),
+        },
     ]
 
     profile["micro_observations"] = [
-        {"text": "Hardware keeps coming up even when talking about software careers.", "timestamp": _now(), "session": 1},
-        {"text": "'pata nahi' appears multiple times but energy clearly changes when he talks about fixing things.", "timestamp": _now(), "session": 2},
+        {
+            "text": "Hardware keeps coming up even when talking about software careers.",
+            "timestamp": _now(),
+            "session": 1,
+        },
+        {
+            "text": "'pata nahi' appears multiple times but energy clearly changes when he talks about fixing things.",
+            "timestamp": _now(),
+            "session": 2,
+        },
     ]
 
     profile["futures_generated"] = [
@@ -157,6 +216,7 @@ def seed_aryan():
 
 
 def seed_priya():
+    _delete_if_exists("demo_priya")
     profile = create_new_profile(
         name="Priya",
         grade=10,
@@ -210,23 +270,61 @@ def seed_priya():
     profile["last_session"] = str(date.today())
 
     profile["aawaz_history"] = [
-        {"role": "user", "content": "mummy chahti hain main doctor banun. ghar mein sab doctors hain"},
-        {"role": "aawaz", "content": "Aur tu? Jab koi nahi sunta, toh tu kya sochti hai future ke baare mein?"},
-        {"role": "user", "content": "actually mujhe biology interesting lagti hai but I keep wondering why things work, not just what they are"},
-        {"role": "aawaz", "content": "That distinction matters more than it sounds. What's the last thing you looked up just because you were curious, not for exams?"},
-        {"role": "user", "content": "how antibiotic resistance actually happens. not the definition, the actual mechanism. I watched 3 videos"},
-        {"role": "aawaz", "content": "Three videos on mechanism, not definition. That's not studying - that's genuine curiosity about systems. What did you understand by the end that the first video didn't explain?"},
+        {
+            "role": "user",
+            "content": "mummy chahti hain main doctor banun. ghar mein sab doctors hain",
+        },
+        {
+            "role": "aawaz",
+            "content": "Aur tu? Jab koi nahi sunta, toh tu kya sochti hai future ke baare mein?",
+        },
+        {
+            "role": "user",
+            "content": "actually mujhe biology interesting lagti hai but I keep wondering why things work, not just what they are",
+        },
+        {
+            "role": "aawaz",
+            "content": "That distinction matters more than it sounds. What's the last thing you looked up just because you were curious, not for exams?",
+        },
+        {
+            "role": "user",
+            "content": "how antibiotic resistance actually happens. not the definition, the actual mechanism. I watched 3 videos",
+        },
+        {
+            "role": "aawaz",
+            "content": "Three videos on mechanism, not definition. That's not studying - that's genuine curiosity about systems. What did you understand by the end that the first video didn't explain?",
+        },
     ]
 
     profile["conversation_history"] = [
-        {"role": "user", "content": "kya main NEET ke bina bhi biology mein kuch kar sakti hoon", "timestamp": _now()},
-        {"role": "bhavishya", "content": "Haan - aur yeh sawaal poochna already ek signal hai. Jo cheez tujhe antibiotic resistance ke mechanism tak le gayi - woh researcher ki curiosity hai, not a clinician's. Research, public health, epidemiology, science communication - inhe NEET nahi chahiye. BSc Research programs at IISERs specifically recruit the kind of curiosity you just described.", "timestamp": _now()},
-        {"role": "user", "content": "but ghar waale samjhenge nahi", "timestamp": _now()},
-        {"role": "bhavishya", "content": "Yeh fair concern hai. Unke liye 'doctor' ka matlab 'stable aur respected' hai - that's not wrong, that's real. The conversation to have isn't 'I don't want to be a doctor.' It's: 'What if I could have the same stability and more impact?' IISER graduates go into ISRO, WHO, top pharma research. Ek kaam kar - IISER Pune ka placement data dekh, phir yeh baat karna easier hogi.", "timestamp": _now()},
+        {
+            "role": "user",
+            "content": "kya main NEET ke bina bhi biology mein kuch kar sakti hoon",
+            "timestamp": _now(),
+        },
+        {
+            "role": "bhavishya",
+            "content": "Haan - aur yeh sawaal poochna already ek signal hai. Jo cheez tujhe antibiotic resistance ke mechanism tak le gayi - woh researcher ki curiosity hai, not a clinician's. Research, public health, epidemiology, science communication - inhe NEET nahi chahiye. BSc Research programs at IISERs specifically recruit the kind of curiosity you just described.",
+            "timestamp": _now(),
+        },
+        {
+            "role": "user",
+            "content": "but ghar waale samjhenge nahi",
+            "timestamp": _now(),
+        },
+        {
+            "role": "bhavishya",
+            "content": "Yeh fair concern hai. Unke liye 'doctor' ka matlab 'stable aur respected' hai - that's not wrong, that's real. The conversation to have isn't 'I don't want to be a doctor.' It's: 'What if I could have the same stability and more impact?' IISER graduates go into ISRO, WHO, top pharma research. Ek kaam kar - IISER Pune ka placement data dekh, phir yeh baat karna easier hogi.",
+            "timestamp": _now(),
+        },
     ]
 
     profile["micro_observations"] = [
-        {"text": "Keeps distinguishing between 'what' and 'why' - this pattern appears across multiple messages.", "timestamp": _now(), "session": 1},
+        {
+            "text": "Keeps distinguishing between 'what' and 'why' - this pattern appears across multiple messages.",
+            "timestamp": _now(),
+            "session": 1,
+        },
     ]
 
     profile["futures_generated"] = [
