@@ -13,6 +13,14 @@ CLOUD_MODEL = "gemma-4-26b-a4b-it"
 OFFLINE_MODEL = "gemma4:e4b"
 
 _SYSTEM_PROMPT_CACHE: str | None = None
+_GEMINI_CLIENT: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _GEMINI_CLIENT
+    if _GEMINI_CLIENT is None:
+        _GEMINI_CLIENT = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    return _GEMINI_CLIENT
 
 
 def _load_system_prompt() -> str:
@@ -86,8 +94,7 @@ async def run_aawaz_transcribe(
     parts.append({"text": "\n\n".join(instructions)})
 
     try:
-        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-        response = client.models.generate_content(
+        response = _get_client().models.generate_content(
             model=CLOUD_MODEL,
             contents=[{"role": "user", "parts": parts}],
         )
@@ -219,8 +226,7 @@ async def run_aawaz_chat(
 
     if mode == "cloud":
         try:
-            client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-            response = client.models.generate_content(
+            response = _get_client().models.generate_content(
                 model=CLOUD_MODEL,
                 contents=contents,
                 config={"system_instruction": system_prompt},
