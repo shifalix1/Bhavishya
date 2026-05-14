@@ -30,7 +30,11 @@ logger = logging.getLogger("bhavishya")
 
 from core.darpan import run_darpan, init_client as darpan_init
 from core.simulator import run_simulator, init_client as simulator_init
-from core.margdarshak import run_margdarshak, init_client as margdarshak_init
+from core.margdarshak import (
+    run_margdarshak_guidance,
+    run_margdarshak_question,
+    init_client as margdarshak_init,
+)
 from core.aawaz import (
     run_aawaz_transcribe,
     run_aawaz_chat,
@@ -252,6 +256,22 @@ class SimulateRequest(BaseModel):
     name: str
     grade: int
     uid: str
+
+
+class MargdarshakGuidanceRequest(BaseModel):
+    uid: str
+    name: str
+    grade: int
+    language: Optional[str] = "english"
+
+
+class MargdarshakQuestionRequest(BaseModel):
+    uid: str
+    name: str
+    grade: int
+    question: str
+    language: Optional[str] = "english"
+    guidance: Optional[dict] = None
 
 
 class AawazTranscribeRequest(BaseModel):
@@ -604,69 +624,111 @@ async def simulate(req: SimulateRequest, request: Request):
     return {**futures, "is_fallback": is_fallback}
 
 
-@core_router.post("/chat")
-@limiter.limit("20/minute")
-async def chat(req: ChatRequest, request: Request):
+@core_router.post("/margdarshak/guidance")
+@limiter.limit("10/minute")
+async def margdarshak_guidance(req: MargdarshakGuidanceRequest, request: Request):
+    """
+    Generate Margdarshak structured guidance from identity fingerprint.
+    Returns: current_read, next_move (action/why/type), watch_for, opening_line.
+    Requires identity_current (Darpan must have run first).
+    """
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
-            status_code=400, detail="No identity found. Run /session first."
+            status_code=400,
+            detail="No identity found. Complete a Darpan session first.",
         )
 
-    language = detect_language(req.question)
-    history = get_last_n_messages(profile, n=5)
+    identity = profile["identity_current"]
+    language = req.language or profile.get("language_preference", "english")
+    is_first_guidance = not bool(profile.get("margdarshak_guidance"))
 
-    bhavishya_turns = sum(
-        1
-        for m in profile.get("conversation_history", [])
-        if m.get("role") == "bhavishya"
-    )
+    futures_list = profile.get("futures_generated", [])
+    latest_futures = futures_list[-1].get("futures", []) if futures_list else None
 
-    is_returning_first_chat = (
-        profile.get("session_count", 0) > 1 and bhavishya_turns == 0
-    )
-    allow_signals = is_returning_first_chat or (bhavishya_turns % 3 == 2)
-
-    micro_obs = get_latest_observation(profile) if allow_signals else None
-    callback = get_identity_callback(profile) if allow_signals else None
-
-    career_data = get_careers_for_identity(profile["identity_current"], n=3)
+    callback = get_identity_callback(profile)
+    career_data = get_careers_for_identity(identity, n=3)
 
     logger.info(
-        f"[CHAT] {req.name} | lang={language} | turns={bhavishya_turns} | "
-        f"callback={'yes' if callback else 'no'} | "
-        f"observation={'yes' if micro_obs else 'no'}"
+        f"[MARGDARSHAK/GUIDANCE] {req.name} | lang={language} | "
+        f"first={'yes' if is_first_guidance else 'no'} | "
+        f"sessions={profile.get('session_count', 0)}"
     )
 
-    response, is_fallback = await asyncio.to_thread(
-        run_margdarshak,
-        question=req.question,
-        identity_json=profile["identity_current"],
-        history=history,
+    guidance, is_fallback = await asyncio.to_thread(
+        run_margdarshak_guidance,
+        identity_json=identity,
         language=language,
-        micro_observation=micro_obs,
+        session_count=profile.get("session_count", 1),
+        is_first_guidance=is_first_guidance,
+        futures=latest_futures,
         identity_callback=callback,
         career_data=career_data,
-        total_bhavishya_turns=bhavishya_turns,
     )
 
-    profile = add_message(profile, "user", req.question)
-    profile = add_message(profile, "bhavishya", response)
-
-    # Rolling summary check before save
-    profile = await _maybe_compress(profile)
-    profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
-
+    profile["margdarshak_guidance"] = guidance
+    profile["margdarshak_question_used"] = False
     save_student(profile)
 
     return {
-        "response": response,
-        "language_detected": language,
-        "had_callback": callback is not None,
+        "guidance": guidance,
         "is_fallback": is_fallback,
-        "identity_confidence": profile["identity_current"].get(
-            "identity_confidence", 5
-        ),
+        "identity_confidence": identity.get("identity_confidence", 5),
+        "session_count": profile.get("session_count", 1),
+        "question_used": False,
+    }
+
+
+@core_router.post("/margdarshak/question")
+@limiter.limit("5/minute")
+async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request):
+    """
+    Student's one question per guidance cycle to Margdarshak.
+    Scarcity is intentional.
+    """
+    profile = load_student(req.name, req.grade, req.uid)
+    if not profile or not profile.get("identity_current"):
+        raise HTTPException(
+            status_code=400,
+            detail="No identity found. Complete a Darpan session first.",
+        )
+
+    if profile.get("margdarshak_question_used"):
+        raise HTTPException(
+            status_code=429,
+            detail="One question per session. Come back after your next Darpan session.",
+        )
+
+    identity = profile["identity_current"]
+    language = req.language or profile.get("language_preference", "english")
+    guidance = req.guidance or profile.get("margdarshak_guidance") or {}
+
+    logger.info(f"[MARGDARSHAK/QUESTION] {req.name} | lang={language}")
+
+    answer, is_fallback = await asyncio.to_thread(
+        run_margdarshak_question,
+        question=req.question,
+        identity_json=identity,
+        guidance=guidance,
+        language=language,
+    )
+
+    profile["margdarshak_question_used"] = True
+    if "margdarshak_history" not in profile:
+        profile["margdarshak_history"] = []
+    profile["margdarshak_history"].append(
+        {
+            "question": req.question,
+            "answer": answer,
+            "session": profile.get("session_count", 1),
+        }
+    )
+    save_student(profile)
+
+    return {
+        "answer": answer,
+        "is_fallback": is_fallback,
+        "question_used": True,
     }
 
 
