@@ -108,7 +108,7 @@ def create_new_profile(
         "futures_generated": [],
         "conversation_history": [],
         "aawaz_history": [],
-        "language_preference": "hinglish",
+        "language_preference": "english",
         "micro_observations": [],
         # Rolling summary: compressed digest of older conversation turns.
         # Initialised as empty string; populated by compress_history().

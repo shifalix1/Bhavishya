@@ -181,6 +181,8 @@ UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":  # ← let CORS preflight through
+        return await call_next(request)
     if request.url.path in UNPROTECTED_PATHS:
         return await call_next(request)
     if not _API_KEY:
