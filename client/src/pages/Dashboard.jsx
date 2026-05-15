@@ -8,6 +8,55 @@ import { api } from "../lib/api";
 import { applyTheme, getStoredTheme } from "../lib/theme";
 import styles from "./Dashboard.module.css";
 
+// Shows delta between current identity and last session snapshot.
+// Only renders if there's something meaningful to surface.
+function InsightBanner({ student, onDismiss }) {
+  const delta = student.identity_delta;
+  const lastSession = student.last_session_summary;
+  if (!delta && !lastSession) return null;
+
+  const prev = delta?.previous_confidence;
+  const curr = delta?.current_confidence;
+  const resolvedFear = delta?.resolved_fears?.[0];
+  const newStrength = delta?.new_strengths?.[0];
+  const margdarshakHint = lastSession?.has_new_move;
+
+  const lines = [];
+  if (prev != null && curr != null && curr > prev) {
+    lines.push(`Confidence ${prev} → ${curr} since your last session.`);
+  }
+  if (resolvedFear) {
+    lines.push(`"${resolvedFear}" — looks resolved.`);
+  }
+  if (newStrength) {
+    lines.push(`New strength surfaced: ${newStrength}.`);
+  }
+  if (margdarshakHint) {
+    lines.push(`Margdarshak has a new move for you.`);
+  }
+
+  if (!lines.length) return null;
+
+  return (
+    <div className={styles.insightBanner}>
+      <div className={styles.insightLines}>
+        {lines.map((l, i) => (
+          <span key={i} className={styles.insightLine}>
+            {l}
+          </span>
+        ))}
+      </div>
+      <button
+        className={styles.insightDismiss}
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export default function Dashboard({ student: initialStudent, onLogout }) {
   const [student, setStudent] = useState(initialStudent);
   const [tab, setTab] = useState("session");
@@ -17,6 +66,10 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
   const [aawazDarpanLoading, setAawazDarpanLoading] = useState(false);
   const [aawazError, setAawazError] = useState("");
   const [margdarshakPrefill, setMargdarshakPrefill] = useState(null);
+  const [showInsightBanner, setShowInsightBanner] = useState(
+    // Only show if the login response carried delta data
+    !!(initialStudent.identity_delta || initialStudent.last_session_summary),
+  );
 
   useEffect(() => {
     applyTheme(getStoredTheme());
@@ -73,6 +126,13 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
       <Sidebar student={student} tab={tab} onTab={setTab} onLogout={onLogout} />
 
       <main className={styles.main}>
+        {showInsightBanner && (
+          <InsightBanner
+            student={student}
+            onDismiss={() => setShowInsightBanner(false)}
+          />
+        )}
+
         {/* Aawaz: always mounted, shown/hidden via CSS so state is never lost */}
         <div
           className={styles.aawazPane}

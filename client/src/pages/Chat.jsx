@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { margdarshakApi } from "../lib/api";
+import { api } from "../lib/api";
 import styles from "./Chat.module.css";
 
 // Lock gate
@@ -160,10 +160,10 @@ function QuestionView({ guidance, student, onBack }) {
     setLoading(true);
     setError("");
     try {
-      const res = await margdarshakApi.question(
+      const res = await api.margdarshakQuestion(
+        student.uid,
         student.name,
         student.grade,
-        student.uid,
         question.trim(),
         guidance,
         student.language_preference || "english",
@@ -271,10 +271,10 @@ export default function Chat({ student, onGoToDarpan }) {
   // set phase to "loading" themselves before calling this.
   const loadGuidance = useCallback(async () => {
     try {
-      const res = await margdarshakApi.guidance(
+      const res = await api.margdarshakGuidance(
+        student.uid,
         student.name,
         student.grade,
-        student.uid,
         student.language_preference || "english",
       );
       setGuidance(res.guidance);

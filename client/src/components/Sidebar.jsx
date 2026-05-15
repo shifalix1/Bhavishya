@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import ThemeToggle from "./ThemeToggle";
 import { api } from "../lib/api";
 import styles from "./Sidebar.module.css";
@@ -9,6 +9,25 @@ const NAV = [
   { id: "margdarshak", label: "Margdarshak", sub: "Your guide" },
   { id: "futures", label: "Bhavishya Core", sub: "Your futures" },
 ];
+
+// ── Hoisted above all consumers ───────────────────────────────────────────────
+function CloseIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
 
 function diffIdentity(prev, curr) {
   if (!prev || !curr) return null;
@@ -61,7 +80,9 @@ function AawazTranscript({ turns }) {
         {(expanded ? turns : preview).map((m, i) => (
           <div
             key={i}
-            className={`${styles.transcriptMsg} ${m.role === "user" ? styles.transcriptUser : styles.transcriptAawaz}`}
+            className={`${styles.transcriptMsg} ${
+              m.role === "user" ? styles.transcriptUser : styles.transcriptAawaz
+            }`}
           >
             <span className={styles.transcriptRole}>
               {m.role === "user" ? "You" : "Aawaz"}
@@ -82,7 +103,6 @@ function AawazTranscript({ turns }) {
   );
 }
 
-// Cycle step indicator: shows what happened in a session
 function SessionCycle({ hasAawaz, hasDarpan, hasMarg, hasFutures }) {
   const steps = [
     { key: "aawaz", label: "Aawaz", done: hasAawaz },
@@ -113,11 +133,68 @@ function SessionCycle({ hasAawaz, hasDarpan, hasMarg, hasFutures }) {
   );
 }
 
-function SessionDrawer({ sessionData, prevSessionData, onClose }) {
+// FIX: SessionDrawer now accepts isLoading and sessionNum so it can render
+// a skeleton immediately on first click instead of silently not mounting.
+// Previously: drawer only rendered when openSessionData was truthy, which was
+// never the case on the first click because history hadn't loaded yet.
+function SessionDrawer({
+  sessionData,
+  prevSessionData,
+  onClose,
+  isLoading,
+  sessionNum,
+}) {
+  if (isLoading) {
+    return (
+      <div className={styles.drawer}>
+        <div className={styles.drawerHeader}>
+          <div className={styles.drawerTitleRow}>
+            <span className={styles.drawerTitle}>Session {sessionNum}</span>
+          </div>
+          <button className={styles.drawerClose} onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+        <div className={styles.drawerBody}>
+          {/* Skeleton blocks matching the shape of real content */}
+          <div className={styles.cycleRow} style={{ opacity: 0.35 }}>
+            {["Aawaz", "Darpan", "Margdarshak", "Futures"].map(
+              (label, i, arr) => (
+                <div key={label} className={styles.cycleStep}>
+                  <div className={styles.cycleDot} />
+                  <span className={styles.cycleLabel}>{label}</span>
+                  {i < arr.length - 1 && <div className={styles.cycleLine} />}
+                </div>
+              ),
+            )}
+          </div>
+          <p className={styles.drawerMuted}>Loading session data…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!sessionData) {
+    return (
+      <div className={styles.drawer}>
+        <div className={styles.drawerHeader}>
+          <span className={styles.drawerTitle}>Session {sessionNum}</span>
+          <button className={styles.drawerClose} onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
+        <div className={styles.drawerBody}>
+          <p className={styles.drawerMuted}>
+            No data recorded for this session yet.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const identity = sessionData.identity;
   const futures = sessionData.futures;
   const marg = sessionData.margdarshak || [];
-  const sessionNum = sessionData.session;
   const aawazTurns = sessionData.aawaz_turns || [];
 
   const changes = prevSessionData
@@ -133,8 +210,10 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
     <div className={styles.drawer}>
       <div className={styles.drawerHeader}>
         <div className={styles.drawerTitleRow}>
-          <span className={styles.drawerTitle}>Session {sessionNum}</span>
-          {sessionNum > 1 && changes && (
+          <span className={styles.drawerTitle}>
+            Session {sessionData.session}
+          </span>
+          {sessionData.session > 1 && changes && (
             <span className={styles.changesBadge}>
               {changes.length} change{changes.length > 1 ? "s" : ""}
             </span>
@@ -146,7 +225,6 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
       </div>
 
       <div className={styles.drawerBody}>
-        {/* Session cycle: what happened */}
         <SessionCycle
           hasAawaz={hasAawaz}
           hasDarpan={hasDarpan}
@@ -154,7 +232,6 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
           hasFutures={hasFutures}
         />
 
-        {/* What changed since last session */}
         {changes && changes.length > 0 && (
           <div className={styles.changesBlock}>
             <div className={styles.drawerSectionLabel}>
@@ -169,8 +246,7 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
           </div>
         )}
 
-        {/* Context carried forward */}
-        {sessionNum > 1 && sessionData.context_summary && (
+        {sessionData.session > 1 && sessionData.context_summary && (
           <div className={styles.contextBlock}>
             <div className={styles.drawerSectionLabel}>
               Context carried forward
@@ -179,10 +255,8 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
           </div>
         )}
 
-        {/* Aawaz conversation */}
         {aawazTurns.length > 0 && <AawazTranscript turns={aawazTurns} />}
 
-        {/* Darpan fingerprint */}
         {identity && (
           <div className={styles.drawerSection}>
             <div className={styles.drawerSectionLabel}>Darpan fingerprint</div>
@@ -233,7 +307,6 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
           </div>
         )}
 
-        {/* Margdarshak Q&A */}
         {marg.length > 0 && (
           <div className={styles.drawerSection}>
             <div className={styles.drawerSectionLabel}>
@@ -248,7 +321,6 @@ function SessionDrawer({ sessionData, prevSessionData, onClose }) {
           </div>
         )}
 
-        {/* Futures */}
         {futures && futures.length > 0 && (
           <div className={styles.drawerSection}>
             <div className={styles.drawerSectionLabel}>Futures simulated</div>
@@ -279,6 +351,10 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [openSession, setOpenSession] = useState(null);
 
+  // FIX: ref guards against duplicate in-flight fetches without adding
+  // historyLoading to useCallback deps (which caused stale closure on rapid clicks)
+  const fetchingRef = useRef(false);
+
   const handleLogout = () => {
     try {
       localStorage.removeItem("bhavishya_auth");
@@ -291,24 +367,41 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   };
 
   const loadHistory = useCallback(async () => {
-    if (history || historyLoading) return;
+    if (history) return history;
+    if (fetchingRef.current) return null;
+    fetchingRef.current = true;
     setHistoryLoading(true);
     try {
       const res = await api.getHistory(student.uid);
       setHistory(res);
+      return res;
     } catch (e) {
       console.warn("Could not load history", e);
+      return null;
     } finally {
       setHistoryLoading(false);
+      fetchingRef.current = false;
     }
-  }, [student.uid, history, historyLoading]);
+  }, [student.uid, history]);
 
-  const handleSessionClick = async (sessionNum) => {
-    if (!history && !historyLoading) {
-      await loadHistory();
-    }
-    setOpenSession((prev) => (prev === sessionNum ? null : sessionNum));
-  };
+  // FIX: open drawer immediately so SessionDrawer mounts with its loading
+  // skeleton. Old code awaited loadHistory() before setOpenSession, so
+  // openSessionData was always null during the fetch — drawer never rendered.
+  const handleSessionClick = useCallback(
+    async (sessionNum) => {
+      if (openSession === sessionNum) {
+        setOpenSession(null);
+        return;
+      }
+      // Mount drawer right away — it will show loading skeleton if data isn't ready
+      setOpenSession(sessionNum);
+      if (!history && !fetchingRef.current) {
+        await loadHistory();
+        // State update from loadHistory triggers re-render with real data
+      }
+    },
+    [openSession, history, loadHistory],
+  );
 
   const openSessionData = history?.sessions?.find(
     (s) => s.session === openSession,
@@ -317,6 +410,9 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
     openSession > 1
       ? history?.sessions?.find((s) => s.session === openSession - 1)
       : null;
+
+  const drawerIsLoading =
+    openSession !== null && historyLoading && !openSessionData;
 
   return (
     <aside className={styles.sidebar}>
@@ -354,23 +450,23 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
       {sessionCount > 0 && (
         <div className={styles.sessions}>
           <div className={styles.navHeading}>Session history</div>
-          {historyLoading && (
-            <p className={styles.historyLoading}>Loading...</p>
-          )}
+          {historyLoading && <p className={styles.historyLoading}>Loading…</p>}
           <div className={styles.sessionList}>
             {Array.from({ length: sessionCount }, (_, i) => {
               const num = i + 1;
               const snap = history?.sessions?.find((s) => s.session === num);
+              // FIX: removed history?.aawaz_history fallback — new API returns
+              // aawaz_turns per session inside each session object, not flat.
               const hasDarpan = !!snap?.identity;
               const hasFutures = !!(snap?.futures?.length > 0);
               const hasMarg = !!(snap?.margdarshak?.length > 0);
-              const hasAawaz =
-                snap?.aawaz_turns?.length > 0 ||
-                (num === 1 && history?.aawaz_history?.length > 0);
+              const hasAawaz = !!(snap?.aawaz_turns?.length > 0);
               return (
                 <button
                   key={num}
-                  className={`${styles.sessionItem} ${openSession === num ? styles.sessionItemActive : ""}`}
+                  className={`${styles.sessionItem} ${
+                    openSession === num ? styles.sessionItemActive : ""
+                  }`}
                   onClick={() => handleSessionClick(num)}
                 >
                   <div className={styles.sessionDot} />
@@ -409,11 +505,14 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
         </div>
       )}
 
-      {openSession && openSessionData && (
+      {/* FIX: render whenever openSession is set — not gated on openSessionData */}
+      {openSession !== null && (
         <SessionDrawer
           sessionData={openSessionData}
           prevSessionData={prevSessionData}
           onClose={() => setOpenSession(null)}
+          isLoading={drawerIsLoading}
+          sessionNum={openSession}
         />
       )}
 
@@ -428,23 +527,5 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
         </div>
       </div>
     </aside>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
   );
 }

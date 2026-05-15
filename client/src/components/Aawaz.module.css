@@ -359,6 +359,146 @@
   flex-shrink: 0;
 }
 
+.darpanOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(9, 9, 15, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: overlayIn 0.4s ease;
+}
+
+@keyframes overlayIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.darpanOverlayInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 320px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+/* Pulsing orb — reuses the purple accent */
+.darpanOrb {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #a855f7, #7c3aed 60%, #4c1d95);
+  box-shadow:
+    0 0 0 0 rgba(168, 85, 247, 0.5),
+    0 0 32px rgba(124, 58, 237, 0.4);
+  animation: orbPulse 2s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 0 0 0 rgba(168, 85, 247, 0.5),
+      0 0 32px rgba(124, 58, 237, 0.4);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow:
+      0 0 0 12px rgba(168, 85, 247, 0),
+      0 0 48px rgba(124, 58, 237, 0.6);
+  }
+}
+
+.darpanOverlayTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text, #f0f0f0);
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+.darpanOverlaySub {
+  font-size: 0.8rem;
+  color: var(--text-sub, rgba(240, 240, 240, 0.5));
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Animated progress bar */
+.darpanProgressTrack {
+  width: 200px;
+  height: 2px;
+  background: rgba(124, 58, 237, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.darpanProgressFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #7c3aed, #a855f7);
+  border-radius: 2px;
+  animation: progressFill 10s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes progressFill {
+  0% {
+    width: 0%;
+  }
+  30% {
+    width: 35%;
+  }
+  60% {
+    width: 65%;
+  }
+  85% {
+    width: 88%;
+  }
+  100% {
+    width: 95%;
+  } /* never hits 100% — real completion closes the overlay */
+}
+
+/* Step labels that fade in sequentially */
+.darpanSteps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.darpanStep {
+  font-size: 0.7rem;
+  color: var(--accent, #a855f7);
+  background: rgba(124, 58, 237, 0.1);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  border-radius: 20px;
+  padding: 3px 10px;
+  opacity: 0;
+  animation: stepFadeIn 0.5s ease forwards;
+}
+
+@keyframes stepFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ── Multimedia prompt banner ── */
 .mediaBanner {
   display: flex;

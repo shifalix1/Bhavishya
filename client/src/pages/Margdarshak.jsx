@@ -26,6 +26,50 @@ const MOVE_META = {
   },
 };
 
+function GuidanceSkeleton() {
+  return (
+    <div className={styles.skeletonWrap} aria-hidden="true">
+      {/* Opening line skeleton */}
+      <div className={styles.skeletonOpeningBlock}>
+        <div className={styles.skeletonLine} style={{ width: "90%" }} />
+        <div className={styles.skeletonLine} style={{ width: "70%" }} />
+      </div>
+
+      {/* Section: current read */}
+      <div className={styles.skeletonSection}>
+        <div className={styles.skeletonSectionLabel} style={{ width: 140 }} />
+        <div className={styles.skeletonLine} style={{ width: "95%" }} />
+        <div className={styles.skeletonLine} style={{ width: "80%" }} />
+        <div className={styles.skeletonLine} style={{ width: "60%" }} />
+      </div>
+
+      <div className={styles.skeletonRule} />
+
+      {/* Section: next move */}
+      <div className={styles.skeletonSection}>
+        <div className={styles.skeletonSectionLabel} style={{ width: 100 }} />
+        <div className={styles.skeletonMoveCard}>
+          <div className={styles.skeletonBadge} style={{ width: 72 }} />
+          <div
+            className={styles.skeletonLine}
+            style={{ width: "85%", marginTop: 10 }}
+          />
+          <div className={styles.skeletonLine} style={{ width: "65%" }} />
+        </div>
+      </div>
+
+      <div className={styles.skeletonRule} />
+
+      {/* Section: question */}
+      <div className={styles.skeletonSection}>
+        <div className={styles.skeletonSectionLabel} style={{ width: 90 }} />
+        <div className={styles.skeletonInputBox} />
+        <div className={styles.skeletonBtn} style={{ width: 140 }} />
+      </div>
+    </div>
+  );
+}
+
 function GateView({ onGoToSession }) {
   return (
     <div className={`page-enter ${styles.gateWrap}`}>
@@ -159,9 +203,17 @@ export default function Margdarshak({
 
   if (loading) {
     return (
-      <div className={styles.loadState}>
-        <div className={styles.loadOrb} />
-        <p className={styles.loadLabel}>Reading your fingerprint...</p>
+      <div className={`page-enter ${styles.wrap}`}>
+        <div className={styles.pageHeader}>
+          <span className={styles.pageTag}>Margdarshak</span>
+          <p className={styles.pageTagSub}>
+            {student.name}, Class {student.grade}
+          </p>
+        </div>
+        <p className={styles.skeletonReadingHint}>
+          Reading your fingerprint&hellip;
+        </p>
+        <GuidanceSkeleton />
       </div>
     );
   }

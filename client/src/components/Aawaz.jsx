@@ -56,8 +56,8 @@ function Toast({ toasts, onDismiss }) {
   );
 }
 
-// Fire media prompt after this many user exchanges
-const MEDIA_PROMPT_EXCHANGE = 1;
+// Fire media prompt after this many user exchanges (3 = enough rapport built)
+const MEDIA_PROMPT_EXCHANGE = 3;
 const SILENCE_THRESHOLD_MS = 2500;
 
 export default function Aawaz({ student, onReadyForDarpan }) {
@@ -71,6 +71,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   const [toneSignals, setToneSignals] = useState([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [recState, setRecState] = useState("idle");
+  const recStateRef = useRef("idle"); // mirrors recState — fixes stale closure in startRec/stopRec
   const [recTime, setRecTime] = useState(0);
   const [imagePreview, setImagePreview] = useState(null);
   const [marksheet, setMarksheet] = useState(null);
@@ -334,6 +335,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     audioCtxRef.current?.close().catch(() => {});
     streamRef.current?.getTracks().forEach((t) => t.stop());
     setAudioCtxReady(false);
+    recStateRef.current = "idle";
     setRecState("idle");
     setRecTime(0);
     setInterimText("");
@@ -373,6 +375,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     rec.continuous = true;
     rec.interimResults = true;
 
+    recStateRef.current = "recording";
     setRecState("recording");
     setRecTime(0);
     timerRef.current = setInterval(() => setRecTime((t) => t + 1), 1000);
@@ -415,6 +418,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       audioCtxRef.current?.close().catch(() => {});
       streamRef.current?.getTracks().forEach((t) => t.stop());
       setAudioCtxReady(false);
+      recStateRef.current = "idle";
       setRecState("idle");
       setRecTime(0);
       setInterimText("");
@@ -435,6 +439,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       scheduleAutoStop();
     } catch {
       addToast("Could not start voice input. Please type.", "warning");
+      recStateRef.current = "idle";
       setRecState("idle");
     }
   }, [stopSpeaking, send, stopRec, addToast, startWaveform, language]);
@@ -498,9 +503,22 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           updateUnderstanding(exchangeCount.current + 2, newSignals);
         } else if (res.image_description) {
           setMarksheet(null);
+          // Per Aawaz directive: never label the artifact, never say "this shows you are X".
+          // Ask one curious question about the choice or process behind it.
+          const processQuestions = [
+            "What part of this took the longest?",
+            "Did you plan this out or did it just kind of happen?",
+            "What made you want to do this specific thing?",
+            "Is there something about this you'd do differently next time?",
+            "What were you trying to figure out when you started this?",
+          ];
+          const q =
+            processQuestions[
+              Math.floor(Math.random() * processQuestions.length)
+            ];
           const ackMsg = {
             role: "aawaz",
-            content: `I can see: ${res.image_description}. What does this mean to you?`,
+            content: q,
           };
           setMessages((m) => [...m, ackMsg]);
           speak(ackMsg.content);
@@ -555,6 +573,41 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   return (
     <div className={styles.root}>
       <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Darpan loading overlay — covers entire Aawaz pane while fingerprint is being built */}
+      {darpanLoading && (
+        <div className={styles.darpanOverlay}>
+          <div className={styles.darpanOverlayInner}>
+            <div className={styles.darpanOrb} />
+            <p className={styles.darpanOverlayTitle}>
+              Darpan is reading your fingerprint
+            </p>
+            <p className={styles.darpanOverlaySub}>
+              Building your identity map from everything you shared. This takes
+              about 10 seconds.
+            </p>
+            <div className={styles.darpanProgressTrack}>
+              <div className={styles.darpanProgressFill} />
+            </div>
+            <div className={styles.darpanSteps}>
+              {[
+                "Tone patterns",
+                "Hidden strengths",
+                "Active fears",
+                "Energy signature",
+              ].map((step, i) => (
+                <span
+                  key={step}
+                  className={styles.darpanStep}
+                  style={{ animationDelay: `${i * 1.8}s` }}
+                >
+                  {step}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className={styles.messagesArea}>
         <div className={styles.messages}>
@@ -729,7 +782,9 @@ export default function Aawaz({ student, onReadyForDarpan }) {
 
         <button
           className={`${styles.micBtn} ${recState === "recording" ? styles.micActive : ""}`}
-          onClick={recState === "recording" ? stopRec : startRec}
+          onClick={() =>
+            recStateRef.current === "recording" ? stopRec() : startRec()
+          }
           disabled={darpanLoading || aiLoading || recState === "processing"}
           title={recState === "recording" ? "Stop recording" : "Speak"}
         >

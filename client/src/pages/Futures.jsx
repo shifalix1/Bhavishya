@@ -4,6 +4,41 @@ import FutureCard from "../components/FutureCard";
 import Loader from "../components/Loader";
 import styles from "./Futures.module.css";
 
+function FutureSkeleton({ index }) {
+  const labels = ["Expected path", "Inner call", "Unseen door"];
+  const widths = [
+    ["72%", "88%", "60%"],
+    ["80%", "65%", "90%"],
+    ["68%", "85%", "55%"],
+  ];
+  return (
+    <div
+      className={styles.skeletonCard}
+      style={{ animationDelay: `${index * 0.12}s` }}
+      aria-hidden="true"
+    >
+      <div className={styles.skeletonBadge} style={{ width: 90 }} />
+      <div className={styles.skeletonTitle} style={{ width: "55%" }} />
+      <div className={styles.skeletonBody}>
+        {widths[index].map((w, i) => (
+          <div key={i} className={styles.skeletonLine} style={{ width: w }} />
+        ))}
+        <div className={styles.skeletonLine} style={{ width: "40%" }} />
+      </div>
+      <div className={styles.skeletonMeta}>
+        <div className={styles.skeletonChip} style={{ width: 64 }} />
+        <div className={styles.skeletonChip} style={{ width: 80 }} />
+      </div>
+      <div
+        className={styles.skeletonLabel}
+        style={{ color: "var(--text-muted)", fontSize: 11, marginTop: 8 }}
+      >
+        {labels[index]}
+      </div>
+    </div>
+  );
+}
+
 export default function Futures({
   student,
   shouldSimulate,
@@ -102,7 +137,7 @@ export default function Futures({
         </p>
       </div>
 
-      {!futures && (
+      {!futures && !loading && (
         <div className={styles.cta}>
           <p className="body-sm" style={{ color: "var(--text-muted)" }}>
             Based on your identity fingerprint, Bhavishya will simulate three
@@ -114,17 +149,24 @@ export default function Futures({
             onClick={simulate}
             disabled={loading}
           >
-            {loading ? (
-              <Loader label="Simulating your futures..." />
-            ) : (
-              "Show my futures"
-            )}
+            Show my futures
           </button>
           {error && (
             <p className="body-sm" style={{ color: "var(--error)" }}>
               {error}
             </p>
           )}
+        </div>
+      )}
+
+      {loading && (
+        <div className={styles.skeletonWrap} aria-label="Loading your futures">
+          <p className={styles.skeletonHint}>Simulating your futures&hellip;</p>
+          <div className={styles.cards}>
+            <FutureSkeleton index={0} />
+            <FutureSkeleton index={1} />
+            <FutureSkeleton index={2} />
+          </div>
         </div>
       )}
 
@@ -153,6 +195,11 @@ export default function Futures({
               Run a new Darpan session first for better results.
             </span>
           </div>
+          {error && (
+            <p className="body-sm" style={{ color: "var(--error)" }}>
+              {error}
+            </p>
+          )}
         </>
       )}
     </div>

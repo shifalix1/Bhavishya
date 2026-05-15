@@ -1,6 +1,19 @@
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 
+const STATUS_MESSAGES = {
+  400: "Something wasn't quite right with that request. Try again.",
+  401: "Session expired. Please log in again.",
+  403: "You don't have access to this.",
+  404: "We couldn't find what you were looking for.",
+  409: "There's a conflict with existing data.",
+  422: "Something in your response wasn't quite right. Try again.",
+  429: "Too many requests. Give it a moment, then try again.",
+  500: "Our servers are thinking hard. Give it 10 seconds.",
+  502: "Service is temporarily unreachable. Give it 10 seconds.",
+  503: "Service is temporarily unavailable. Give it 10 seconds.",
+};
+
 async function request(method, path, body, retries = 1) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -21,10 +34,10 @@ async function request(method, path, body, retries = 1) {
           status === 400 ||
           status === 409
         ) {
-          throw new Error(err.detail || `HTTP ${status}`);
+          throw new Error(err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`);
         }
         if (attempt === retries)
-          throw new Error(err.detail || `HTTP ${status}`);
+          throw new Error(err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`);
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         continue;
       }
