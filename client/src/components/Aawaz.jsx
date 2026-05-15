@@ -56,6 +56,10 @@ function Toast({ toasts, onDismiss }) {
   );
 }
 
+// Fire media prompt after this many user exchanges
+const MEDIA_PROMPT_EXCHANGE = 1;
+const SILENCE_THRESHOLD_MS = 2500;
+
 export default function Aawaz({ student, onReadyForDarpan }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -76,6 +80,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   const [audioCtxReady, setAudioCtxReady] = useState(false);
   const [showMediaPrompt, setShowMediaPrompt] = useState(false);
   const [mediaPromptDismissed, setMediaPromptDismissed] = useState(false);
+  const [interimText, setInterimText] = useState("");
 
   const recRef = useRef(null);
   const streamRef = useRef(null);
@@ -84,11 +89,15 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   const waveFrameRef = useRef(null);
   const idleFrameRef = useRef(null);
   const fileRef = useRef(null);
+  const fileRef2 = useRef(null);
   const bottomRef = useRef(null);
   const initialized = useRef(false);
   const exchangeCount = useRef(0);
   const toastIdRef = useRef(0);
   const idleSeedRef = useRef(0);
+  const silenceTimerRef = useRef(null);
+  const lastInterimRef = useRef("");
+  const finalTranscriptRef = useRef("");
 
   const dismissToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -195,6 +204,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   useEffect(
     () => () => {
       clearInterval(timerRef.current);
+      clearTimeout(silenceTimerRef.current);
       cancelAnimationFrame(waveFrameRef.current);
       cancelAnimationFrame(idleFrameRef.current);
       audioCtxRef.current?.close();
@@ -228,6 +238,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       const text = (textOverride !== undefined ? textOverride : input).trim();
       if (!text || aiLoading || darpanLoading) return;
       setInput("");
+      setInterimText("");
       stopSpeaking();
       const newSignals = detectTone(text);
       const mergedSignals = [...new Set([...toneSignals, ...newSignals])].slice(
@@ -238,9 +249,9 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       setMessages((m) => [...m, { role: "user", content: text }]);
       setAiLoading(true);
 
-      // Show media prompt after 3rd exchange if no image yet and not dismissed
+      // Show media prompt after first user exchange if not uploaded/dismissed
       if (
-        exchangeCount.current === 3 &&
+        exchangeCount.current === MEDIA_PROMPT_EXCHANGE &&
         !imagePreview &&
         !marksheet &&
         !mediaPromptDismissed
@@ -311,8 +322,21 @@ export default function Aawaz({ student, onReadyForDarpan }) {
 
   const stopRec = useCallback(() => {
     clearInterval(timerRef.current);
+    clearTimeout(silenceTimerRef.current);
     cancelAnimationFrame(waveFrameRef.current);
-    recRef.current?.stop();
+    if (recRef.current) {
+      try {
+        recRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    audioCtxRef.current?.close().catch(() => {});
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setAudioCtxReady(false);
+    setRecState("idle");
+    setRecTime(0);
+    setInterimText("");
   }, []);
 
   const startRec = useCallback(async () => {
@@ -324,8 +348,9 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       );
       return;
     }
-
     stopSpeaking();
+    finalTranscriptRef.current = "";
+    lastInterimRef.current = "";
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -339,42 +364,60 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       setAudioCtxReady(true);
       startWaveform(analyser);
     } catch {
-      // no waveform, continue
+      // no waveform, still continue
     }
 
     const rec = new SR();
     recRef.current = rec;
     rec.lang = language === "hinglish" ? "hi-IN" : "en-US";
-    rec.continuous = false;
+    rec.continuous = true;
     rec.interimResults = true;
 
     setRecState("recording");
     setRecTime(0);
     timerRef.current = setInterval(() => setRecTime((t) => t + 1), 1000);
 
-    let finalTranscript = "";
+    const scheduleAutoStop = () => {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        const text = finalTranscriptRef.current.trim();
+        if (text) {
+          stopRec();
+          setInput("");
+          send(text);
+        } else {
+          stopRec();
+        }
+      }, SILENCE_THRESHOLD_MS);
+    };
 
     rec.onresult = (e) => {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalTranscript += e.results[i][0].transcript;
+          finalTranscriptRef.current += e.results[i][0].transcript + " ";
         } else {
           interim += e.results[i][0].transcript;
         }
       }
-      setInput(finalTranscript + interim);
+      const combined = finalTranscriptRef.current + interim;
+      setInput(combined);
+      setInterimText(interim);
+      lastInterimRef.current = interim;
+      scheduleAutoStop();
     };
 
     rec.onend = () => {
+      const text = finalTranscriptRef.current.trim();
       clearInterval(timerRef.current);
+      clearTimeout(silenceTimerRef.current);
       cancelAnimationFrame(waveFrameRef.current);
       audioCtxRef.current?.close().catch(() => {});
       streamRef.current?.getTracks().forEach((t) => t.stop());
       setAudioCtxReady(false);
       setRecState("idle");
       setRecTime(0);
-      const text = finalTranscript.trim();
+      setInterimText("");
       if (text) {
         setInput("");
         send(text);
@@ -389,21 +432,30 @@ export default function Aawaz({ student, onReadyForDarpan }) {
 
     try {
       rec.start();
+      scheduleAutoStop();
     } catch {
       addToast("Could not start voice input. Please type.", "warning");
       setRecState("idle");
     }
-  }, [stopSpeaking, send, addToast, startWaveform, language]);
+  }, [stopSpeaking, send, stopRec, addToast, startWaveform, language]);
 
   const handleImage = useCallback(
     async (e) => {
       const file = e.target.files?.[0];
       if (!file || !file.type.startsWith("image/")) return;
+      e.target.value = "";
       setShowMediaPrompt(false);
       setMediaPromptDismissed(true);
+
       const previewReader = new FileReader();
       previewReader.onload = (ev) => setImagePreview(ev.target.result);
       previewReader.readAsDataURL(file);
+
+      setMessages((m) => [
+        ...m,
+        { role: "aawaz", content: "Let me take a look at that..." },
+      ]);
+
       const b64Reader = new FileReader();
       b64Reader.onloadend = async () => {
         const b64 = b64Reader.result.split(",")[1];
@@ -424,14 +476,18 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             "Could not analyse the image. Describe it in text instead.",
             "warning",
           );
+          setMessages((m) => m.slice(0, -1));
           return;
         }
+
+        setMessages((m) => m.slice(0, -1));
+
         if (res.marksheet_data) {
           setMarksheet(res.marksheet_data);
           const ackMsg = {
             role: "aawaz",
             content:
-              "Got your marksheet. Interesting patterns here. Let us talk a bit more first.",
+              "Got your marksheet. There are some interesting patterns here. Tell me one thing -- which subject surprised you most, in either direction?",
           };
           setMessages((m) => [...m, ackMsg]);
           speak(ackMsg.content);
@@ -442,7 +498,17 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           updateUnderstanding(exchangeCount.current + 2, newSignals);
         } else if (res.image_description) {
           setMarksheet(null);
-          send(`[Image uploaded: ${res.image_description}]`);
+          const ackMsg = {
+            role: "aawaz",
+            content: `I can see: ${res.image_description}. What does this mean to you?`,
+          };
+          setMessages((m) => [...m, ackMsg]);
+          speak(ackMsg.content);
+          const newSignals = [
+            ...new Set([...toneSignals, "visual shared"]),
+          ].slice(-7);
+          setToneSignals(newSignals);
+          updateUnderstanding(exchangeCount.current + 1, newSignals);
         } else {
           addToast(
             "Image uploaded but could not be analysed. Try typing about it.",
@@ -452,13 +518,14 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       };
       b64Reader.readAsDataURL(file);
     },
-    [student, toneSignals, speak, send, addToast, updateUnderstanding],
+    [student, toneSignals, speak, addToast, updateUnderstanding],
   );
 
   const removeImage = () => {
     setImagePreview(null);
     setMarksheet(null);
     if (fileRef.current) fileRef.current.value = "";
+    if (fileRef2.current) fileRef2.current.value = "";
   };
 
   const handleRunDarpan = async () => {
@@ -499,6 +566,16 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             />
           ))}
           {aiLoading && <TypingBubble />}
+          {recState === "recording" && interimText && (
+            <div className={`${styles.bubbleRow} ${styles.userRow}`}>
+              <div
+                className={`${styles.bubble} ${styles.userBubble}`}
+                style={{ opacity: 0.5, fontStyle: "italic" }}
+              >
+                {interimText}
+              </div>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -521,7 +598,12 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             </div>
             <span className={styles.stageStatus}>
               {waveState === "speaking" && "Speaking..."}
-              {waveState === "listening" && `Listening  ${fmt(recTime)}`}
+              {waveState === "listening" && (
+                <span className={styles.listeningRow}>
+                  <span className={styles.listeningDot} />
+                  Listening {fmt(recTime)} -- keep talking
+                </span>
+              )}
               {waveState === "processing" && "Processing..."}
               {waveState === "thinking" && "Thinking..."}
               {waveState === "idle" && "Here"}
@@ -532,7 +614,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           <div className={styles.understandingWrap}>
             <UnderstandingArc value={understanding} />
             <span className={styles.understandingPct}>{understanding}%</span>
-            <span className={styles.understandingLabel}>understood</span>
+            <span className={styles.understandingLabel}>UNDERSTOOD</span>
           </div>
         </div>
       </div>
@@ -547,35 +629,18 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         </div>
       )}
 
-      {/* Multimedia prompt banner - appears after 3rd exchange */}
+      {/* Multimedia prompt -- fires after first user exchange */}
       {showMediaPrompt && !ready && (
         <div className={styles.mediaBanner}>
           <p className={styles.mediaBannerText}>
-            <strong>Show me something.</strong> A marksheet, a project photo, a
-            sketch — anything real. It tells me more than words.
+            <strong>Show me something real.</strong> A marksheet, a project
+            photo, or a sketch. Aawaz reads images and it changes everything.
           </p>
-          <label
-            style={{
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "7px 14px",
-              borderRadius: 8,
-              background: "var(--accent)",
-              color: "#fff",
-              fontSize: "0.8125rem",
-              fontWeight: 600,
-              fontFamily: "inherit",
-              border: "none",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
+          <label className={styles.mediaBannerUpload}>
             <ImagePlus size={13} />
             Upload
             <input
-              ref={fileRef}
+              ref={fileRef2}
               type="file"
               accept="image/*"
               onChange={handleImage}
@@ -627,7 +692,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             >
               <ImagePlus size={15} />
               <input
-                ref={!showMediaPrompt ? fileRef : undefined}
+                ref={fileRef}
                 type="file"
                 accept="image/*"
                 onChange={handleImage}
@@ -649,7 +714,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             className={styles.textInput}
             placeholder={
               recState === "recording"
-                ? `${fmt(recTime)}  Listening...`
+                ? `${fmt(recTime)}  Listening -- keep talking, auto-sends on silence...`
                 : language === "hinglish"
                   ? "Hinglish ya English mein type kar..."
                   : "Type anything, or tap the mic..."
@@ -666,7 +731,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           className={`${styles.micBtn} ${recState === "recording" ? styles.micActive : ""}`}
           onClick={recState === "recording" ? stopRec : startRec}
           disabled={darpanLoading || aiLoading || recState === "processing"}
-          title={recState === "recording" ? "Stop" : "Speak"}
+          title={recState === "recording" ? "Stop recording" : "Speak"}
         >
           {recState === "recording" ? (
             <StopIcon />
@@ -682,7 +747,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           {recState === "recording" && <span className={styles.micRing} />}
         </button>
 
-        {input.trim() && (
+        {input.trim() && recState === "idle" && (
           <button
             className={styles.sendBtn}
             onClick={() => send()}
@@ -706,9 +771,7 @@ function WaveVisualizer({ bars, state }) {
       : state === "thinking"
         ? "var(--gold)"
         : "var(--border-warm)";
-
   const midpoint = Math.floor(bars.length / 2);
-
   return (
     <div className={styles.waveViz} aria-hidden="true">
       {bars.map((h, i) => {
@@ -773,9 +836,7 @@ function Bubble({ msg, isLast }) {
     >
       {!isUser && <div className={styles.aawazDot} />}
       <div
-        className={`${styles.bubble} ${isUser ? styles.userBubble : styles.aawazBubble} ${
-          isLast ? styles.lastBubble : ""
-        }`}
+        className={`${styles.bubble} ${isUser ? styles.userBubble : styles.aawazBubble} ${isLast ? styles.lastBubble : ""}`}
       >
         {msg.content}
       </div>

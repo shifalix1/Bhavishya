@@ -6,7 +6,12 @@ import IdentityPanel from "../components/IdentityPanel";
 import Loader from "../components/Loader";
 import styles from "./Session.module.css";
 
-export default function Session({ student, onIdentityReady, onGoToAawaz }) {
+export default function Session({
+  student,
+  onIdentityReady,
+  onGoToAawaz,
+  onGoToMargdarshak,
+}) {
   const [phase, setPhase] = useState(
     student.has_identity ? "darpan_existing" : "intro",
   );
@@ -16,9 +21,10 @@ export default function Session({ student, onIdentityReady, onGoToAawaz }) {
   const handleIntroChoice = (choice, pasteText) => {
     if (choice === "info") {
       setPhase("info");
-    } else if (choice === "aawaz" || choice === "type") {
-      // Redirect to Aawaz tab
+    } else if (choice === "aawaz") {
       onGoToAawaz?.();
+    } else if (choice === "margdarshak") {
+      onGoToMargdarshak?.();
     } else if (choice === "skip") {
       setPhase("darpan_existing");
     } else if (choice === "paste" && pasteText) {
@@ -91,7 +97,6 @@ export default function Session({ student, onIdentityReady, onGoToAawaz }) {
     );
   }
 
-  // intro phase (default when no identity)
   return (
     <div className={`page-enter ${styles.innerPhase}`}>
       {error && <div className={styles.errorBanner}>{error}</div>}

@@ -2,73 +2,80 @@ import { useState } from "react";
 import styles from "./SessionIntro.module.css";
 
 export default function SessionIntro({ student, onChoose }) {
-  const [skipText, setSkipText] = useState("");
-  const [showSkipInput, setShowSkipInput] = useState(false);
+  const [writeText, setWriteText] = useState("");
+  const [showWriteInput, setShowWriteInput] = useState(false);
 
+  // Card 1: Talk to Aawaz (voice/chat conversation)
+  // Card 2: Write & paste directly (skip Aawaz, go straight to Darpan)
+  // Card 3: Go to Margdarshak (only if has identity)
+  // Card 4: What is Bhavishya?
   const cards = [
     {
       id: "aawaz",
       icon: <MicIcon />,
       label: "Talk to Aawaz",
-      sub: "Have a conversation. Aawaz listens and asks questions.",
+      sub: "Have a real conversation. Aawaz listens, asks questions, then builds your fingerprint.",
       accent: true,
     },
     {
-      id: "type",
+      id: "write",
       icon: <TypeIcon />,
-      label: "Type your story",
-      sub: "Write about yourself. No conversation needed.",
+      label: "Write your story",
+      sub: "No back-and-forth. Just write honestly and get your Darpan instantly.",
     },
     {
-      id: "skip",
-      icon: <ZapIcon />,
-      label: student.has_identity ? "View my Darpan" : "Paste and skip",
+      id: "margdarshak",
+      icon: <CompassIcon />,
+      label: "Go to Margdarshak",
       sub: student.has_identity
-        ? "You already have a fingerprint. View it now."
-        : "Paste your own text and skip the interview.",
+        ? "Your guide is ready. Get your next move or ask a question."
+        : "Complete one Darpan session first to unlock your guide.",
+      disabled: !student.has_identity,
     },
     {
       id: "info",
       icon: <InfoIcon />,
       label: "What is Bhavishya?",
-      sub: "Understand what the tool does and what these Hindi words mean.",
+      sub: "Understand what each module does and what the Hindi words mean.",
     },
   ];
 
-  if (showSkipInput) {
+  if (showWriteInput) {
     return (
       <div className={styles.skipWrap}>
         <button
           className={styles.backBtn}
-          onClick={() => setShowSkipInput(false)}
+          onClick={() => setShowWriteInput(false)}
         >
-          Back
+          ← Back
         </button>
-        <h2 className={styles.skipHeading}>Paste your story</h2>
+        <h2 className={styles.skipHeading}>Write your story</h2>
         <p className={styles.skipSub}>
-          Write anything about yourself. Your interests, your confusion, what
+          Write anything about yourself — your interests, your confusion, what
           your parents expect, what you actually want. The more honest, the more
           accurate Darpan will be.
         </p>
         <textarea
           className={styles.skipTextarea}
           placeholder="I am in Class 9 and I honestly have no idea what I want to do. Math feels pointless but I love drawing..."
-          value={skipText}
-          onChange={(e) => setSkipText(e.target.value)}
+          value={writeText}
+          onChange={(e) => setWriteText(e.target.value)}
           rows={8}
           autoFocus
         />
         <div className={styles.skipActions}>
-          <span className={styles.charCount}>{skipText.length} characters</span>
+          <span className={styles.charCount}>
+            {writeText.length} characters
+          </span>
           <button
             className={styles.skipSubmit}
-            disabled={skipText.trim().length < 100}
-            onClick={() => onChoose("paste", skipText.trim())}
+            disabled={writeText.trim().length < 100}
+            onClick={() => onChoose("paste", writeText.trim())}
           >
             Reveal my Darpan
           </button>
         </div>
-        {skipText.trim().length > 0 && skipText.trim().length < 100 && (
+        {writeText.trim().length > 0 && writeText.trim().length < 100 && (
           <p className={styles.skipHint}>
             Write at least 100 characters for an accurate fingerprint.
           </p>
@@ -80,11 +87,15 @@ export default function SessionIntro({ student, onChoose }) {
   return (
     <div className={styles.wrap}>
       <div className={styles.header}>
-        <div className={styles.greeting}>Hey {student.name}.</div>
+        <div className={styles.greeting}>
+          {student.has_identity
+            ? `Welcome back, ${student.name}.`
+            : `Hey ${student.name}.`}
+        </div>
         <p className={styles.sub}>
           {student.has_identity
             ? "You have been here before. What do you want to do today?"
-            : "How do you want to start?"}
+            : "How do you want to start your first session?"}
         </p>
       </div>
 
@@ -92,17 +103,19 @@ export default function SessionIntro({ student, onChoose }) {
         {cards.map((card) => (
           <button
             key={card.id}
-            className={`${styles.card} ${card.accent ? styles.cardAccent : ""}`}
+            className={`${styles.card} ${card.accent ? styles.cardAccent : ""} ${card.disabled ? styles.cardDisabled : ""}`}
             onClick={() => {
-              if (card.id === "skip" && !student.has_identity) {
-                setShowSkipInput(true);
+              if (card.disabled) return;
+              if (card.id === "write") {
+                setShowWriteInput(true);
               } else {
                 onChoose(card.id);
               }
             }}
+            disabled={card.disabled}
           >
             <div
-              className={`${styles.cardIcon} ${card.accent ? styles.cardIconAccent : ""}`}
+              className={`${styles.cardIcon} ${card.accent ? styles.cardIconAccent : ""} ${card.id === "margdarshak" && student.has_identity ? styles.cardIconCompass : ""}`}
             >
               {card.icon}
             </div>
@@ -110,7 +123,7 @@ export default function SessionIntro({ student, onChoose }) {
               <span className={styles.cardLabel}>{card.label}</span>
               <span className={styles.cardSub}>{card.sub}</span>
             </div>
-            <ArrowIcon />
+            {!card.disabled && <ArrowIcon />}
           </button>
         ))}
       </div>
@@ -160,7 +173,7 @@ function TypeIcon() {
     </svg>
   );
 }
-function ZapIcon() {
+function CompassIcon() {
   return (
     <svg
       width="20"
@@ -172,7 +185,8 @@ function ZapIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      <circle cx="12" cy="12" r="10" />
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
     </svg>
   );
 }

@@ -10,24 +10,182 @@ const NAV = [
   { id: "futures", label: "Bhavishya Core", sub: "Your futures" },
 ];
 
-function SessionDrawer({ session, onClose }) {
-  const identity = session.identity;
-  const futures = session.futures;
-  const marg = session.margdarshak || [];
+function diffIdentity(prev, curr) {
+  if (!prev || !curr) return null;
+  const changes = [];
+
+  const prevConf = prev.identity_confidence ?? 0;
+  const currConf = curr.identity_confidence ?? 0;
+  if (Math.abs(prevConf - currConf) >= 1) {
+    changes.push(
+      `Confidence ${prevConf < currConf ? "up" : "down"} from ${prevConf} to ${currConf}/10`,
+    );
+  }
+
+  const prevVals = new Set(
+    (prev.core_values || []).map((v) => v.toLowerCase()),
+  );
+  const currVals = new Set(
+    (curr.core_values || []).map((v) => v.toLowerCase()),
+  );
+  const addedVals = [...currVals].filter((v) => !prevVals.has(v));
+  const removedVals = [...prevVals].filter((v) => !currVals.has(v));
+  if (addedVals.length) changes.push(`New values: ${addedVals.join(", ")}`);
+  if (removedVals.length)
+    changes.push(`Values dropped: ${removedVals.join(", ")}`);
+
+  const prevFears = new Set(
+    (prev.active_fears || []).map((v) => v.toLowerCase()),
+  );
+  const currFears = new Set(
+    (curr.active_fears || []).map((v) => v.toLowerCase()),
+  );
+  const resolvedFears = [...prevFears].filter((v) => !currFears.has(v));
+  const newFears = [...currFears].filter((v) => !prevFears.has(v));
+  if (resolvedFears.length) changes.push(`Fear resolved: ${resolvedFears[0]}`);
+  if (newFears.length) changes.push(`New fear: ${newFears[0]}`);
+
+  return changes.length ? changes : null;
+}
+
+function AawazTranscript({ turns }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!turns || turns.length === 0) return null;
+  const preview = turns.slice(0, 4);
+  const rest = turns.slice(4);
+
+  return (
+    <div className={styles.aawazTranscript}>
+      <div className={styles.drawerSectionLabel}>Aawaz conversation</div>
+      <div className={styles.transcriptList}>
+        {(expanded ? turns : preview).map((m, i) => (
+          <div
+            key={i}
+            className={`${styles.transcriptMsg} ${m.role === "user" ? styles.transcriptUser : styles.transcriptAawaz}`}
+          >
+            <span className={styles.transcriptRole}>
+              {m.role === "user" ? "You" : "Aawaz"}
+            </span>
+            <span className={styles.transcriptText}>{m.content}</span>
+          </div>
+        ))}
+      </div>
+      {rest.length > 0 && (
+        <button
+          className={styles.expandBtn}
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {expanded ? "Show less" : `+${rest.length} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Cycle step indicator: shows what happened in a session
+function SessionCycle({ hasAawaz, hasDarpan, hasMarg, hasFutures }) {
+  const steps = [
+    { key: "aawaz", label: "Aawaz", done: hasAawaz },
+    { key: "darpan", label: "Darpan", done: hasDarpan },
+    { key: "marg", label: "Margdarshak", done: hasMarg },
+    { key: "futures", label: "Futures", done: hasFutures },
+  ];
+  return (
+    <div className={styles.cycleRow}>
+      {steps.map((s, i) => (
+        <div key={s.key} className={styles.cycleStep}>
+          <div
+            className={`${styles.cycleDot} ${s.done ? styles.cycleDotDone : ""}`}
+          />
+          <span
+            className={`${styles.cycleLabel} ${s.done ? styles.cycleLabelDone : ""}`}
+          >
+            {s.label}
+          </span>
+          {i < steps.length - 1 && (
+            <div
+              className={`${styles.cycleLine} ${s.done ? styles.cycleLineDone : ""}`}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SessionDrawer({ sessionData, prevSessionData, onClose }) {
+  const identity = sessionData.identity;
+  const futures = sessionData.futures;
+  const marg = sessionData.margdarshak || [];
+  const sessionNum = sessionData.session;
+  const aawazTurns = sessionData.aawaz_turns || [];
+
+  const changes = prevSessionData
+    ? diffIdentity(prevSessionData.identity, identity)
+    : null;
+
+  const hasAawaz = aawazTurns.length > 0;
+  const hasDarpan = !!identity;
+  const hasMarg = marg.length > 0;
+  const hasFutures = !!(futures && futures.length > 0);
 
   return (
     <div className={styles.drawer}>
       <div className={styles.drawerHeader}>
-        <span className={styles.drawerTitle}>Session {session.session}</span>
+        <div className={styles.drawerTitleRow}>
+          <span className={styles.drawerTitle}>Session {sessionNum}</span>
+          {sessionNum > 1 && changes && (
+            <span className={styles.changesBadge}>
+              {changes.length} change{changes.length > 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
         <button className={styles.drawerClose} onClick={onClose}>
-          ✕
+          <CloseIcon />
         </button>
       </div>
 
       <div className={styles.drawerBody}>
+        {/* Session cycle: what happened */}
+        <SessionCycle
+          hasAawaz={hasAawaz}
+          hasDarpan={hasDarpan}
+          hasMarg={hasMarg}
+          hasFutures={hasFutures}
+        />
+
+        {/* What changed since last session */}
+        {changes && changes.length > 0 && (
+          <div className={styles.changesBlock}>
+            <div className={styles.drawerSectionLabel}>
+              What changed since last session
+            </div>
+            {changes.map((c, i) => (
+              <div key={i} className={styles.changeItem}>
+                <span className={styles.changeDot} />
+                <span className={styles.changeText}>{c}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Context carried forward */}
+        {sessionNum > 1 && sessionData.context_summary && (
+          <div className={styles.contextBlock}>
+            <div className={styles.drawerSectionLabel}>
+              Context carried forward
+            </div>
+            <p className={styles.contextText}>{sessionData.context_summary}</p>
+          </div>
+        )}
+
+        {/* Aawaz conversation */}
+        {aawazTurns.length > 0 && <AawazTranscript turns={aawazTurns} />}
+
+        {/* Darpan fingerprint */}
         {identity && (
           <div className={styles.drawerSection}>
-            <div className={styles.drawerSectionLabel}>Darpan Reveal</div>
+            <div className={styles.drawerSectionLabel}>Darpan fingerprint</div>
             <p className={styles.drawerText}>{identity.thinking_style}</p>
             {identity.energy_signature && (
               <p className={styles.drawerMuted}>{identity.energy_signature}</p>
@@ -39,33 +197,65 @@ function SessionDrawer({ session, onClose }) {
                 </span>
               ))}
             </div>
+            {identity.active_fears?.length > 0 && (
+              <div className={styles.fearRow}>
+                {identity.active_fears.slice(0, 2).map((f, i) => (
+                  <span
+                    key={i}
+                    className={`${styles.drawerTag} ${styles.fearTag}`}
+                  >
+                    {f}
+                  </span>
+                ))}
+              </div>
+            )}
             {identity.identity_confidence !== undefined && (
-              <span className={styles.drawerConf}>
-                Confidence: {identity.identity_confidence}/10
-              </span>
+              <div className={styles.confRow}>
+                <span className={styles.drawerConf}>
+                  Confidence: {identity.identity_confidence}/10
+                </span>
+                <div className={styles.confBarMini}>
+                  <div
+                    className={styles.confBarMiniFill}
+                    style={{
+                      width: `${(identity.identity_confidence / 10) * 100}%`,
+                      background:
+                        identity.identity_confidence >= 7
+                          ? "var(--success)"
+                          : identity.identity_confidence >= 4
+                            ? "var(--gold)"
+                            : "var(--error)",
+                    }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         )}
 
+        {/* Margdarshak Q&A */}
         {marg.length > 0 && (
           <div className={styles.drawerSection}>
-            <div className={styles.drawerSectionLabel}>Margdarshak</div>
+            <div className={styles.drawerSectionLabel}>
+              Margdarshak guidance
+            </div>
             {marg.map((m, i) => (
               <div key={i} className={styles.drawerQA}>
-                <p className={styles.drawerQ}>"{m.question}"</p>
+                {m.question && <p className={styles.drawerQ}>"{m.question}"</p>}
                 <p className={styles.drawerA}>{m.answer}</p>
               </div>
             ))}
           </div>
         )}
 
+        {/* Futures */}
         {futures && futures.length > 0 && (
           <div className={styles.drawerSection}>
             <div className={styles.drawerSectionLabel}>Futures simulated</div>
             {futures.map((f, i) => (
               <div key={i} className={styles.drawerFuture}>
                 <span className={styles.drawerFutureType}>
-                  {f.type?.replace("_", " ")}
+                  {f.type?.replace(/_/g, " ")}
                 </span>
                 <span className={styles.drawerFutureTitle}>{f.title}</span>
               </div>
@@ -73,7 +263,7 @@ function SessionDrawer({ session, onClose }) {
           </div>
         )}
 
-        {!identity && marg.length === 0 && !futures && (
+        {!hasDarpan && !hasMarg && !hasFutures && aawazTurns.length === 0 && (
           <p className={styles.drawerMuted}>
             No data recorded for this session yet.
           </p>
@@ -114,13 +304,19 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   }, [student.uid, history, historyLoading]);
 
   const handleSessionClick = async (sessionNum) => {
-    await loadHistory();
-    setOpenSession(sessionNum);
+    if (!history && !historyLoading) {
+      await loadHistory();
+    }
+    setOpenSession((prev) => (prev === sessionNum ? null : sessionNum));
   };
 
   const openSessionData = history?.sessions?.find(
     (s) => s.session === openSession,
   );
+  const prevSessionData =
+    openSession > 1
+      ? history?.sessions?.find((s) => s.session === openSession - 1)
+      : null;
 
   return (
     <aside className={styles.sidebar}>
@@ -166,8 +362,11 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
               const num = i + 1;
               const snap = history?.sessions?.find((s) => s.session === num);
               const hasDarpan = !!snap?.identity;
-              const hasFutures = snap?.futures?.length > 0;
-              const hasMarg = snap?.margdarshak?.length > 0;
+              const hasFutures = !!(snap?.futures?.length > 0);
+              const hasMarg = !!(snap?.margdarshak?.length > 0);
+              const hasAawaz =
+                snap?.aawaz_turns?.length > 0 ||
+                (num === 1 && history?.aawaz_history?.length > 0);
               return (
                 <button
                   key={num}
@@ -178,6 +377,11 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
                   <div className={styles.sessionMeta}>
                     <span className={styles.sessionLabel}>Session {num}</span>
                     <span className={styles.sessionPills}>
+                      {hasAawaz && (
+                        <span className={styles.pill} title="Aawaz">
+                          A
+                        </span>
+                      )}
                       {hasDarpan && (
                         <span className={styles.pill} title="Darpan done">
                           D
@@ -207,7 +411,8 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
 
       {openSession && openSessionData && (
         <SessionDrawer
-          session={openSessionData}
+          sessionData={openSessionData}
+          prevSessionData={prevSessionData}
           onClose={() => setOpenSession(null)}
         />
       )}
@@ -223,5 +428,23 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
   );
 }

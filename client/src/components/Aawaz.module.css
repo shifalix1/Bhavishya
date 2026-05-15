@@ -1,4 +1,4 @@
-/* Aawaz - fully theme-aware, no hardcoded dark */
+/* Aawaz — fully theme-aware, no hardcoded dark colours */
 .root {
   display: flex;
   flex-direction: column;
@@ -9,7 +9,7 @@
   color: var(--text);
 }
 
-/* Toast */
+/* ── Toast ── */
 .toastStack {
   position: absolute;
   top: 12px;
@@ -75,7 +75,7 @@
   opacity: 1;
 }
 
-/* Messages */
+/* ── Messages area ── */
 .messagesArea {
   flex: 1;
   min-height: 0;
@@ -108,7 +108,7 @@
   border-radius: 4px;
 }
 
-/* Bubbles */
+/* ── Bubbles ── */
 .bubbleRow {
   display: flex;
   align-items: flex-end;
@@ -174,7 +174,7 @@
   border-bottom-right-radius: 5px;
 }
 
-/* Typing dots */
+/* ── Typing dots ── */
 .typingDots {
   display: inline-flex;
   align-items: center;
@@ -205,14 +205,14 @@
   }
 }
 
-/* Stage bar - horizontal layout, fully theme-aware */
+/* ── Stage bar ── */
 .stage {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 88px;
+  min-height: 72px;
   flex-shrink: 0;
   padding: 12px 20px;
   border-top: 1px solid var(--border);
@@ -227,15 +227,16 @@
 }
 .stageRight {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 .stageInfo {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 .stageNameRow {
   display: flex;
@@ -282,29 +283,62 @@
   color: var(--gold);
   background: var(--gold-dim);
 }
+
 .stageStatus {
   font-size: 0.75rem;
   color: var(--text-muted);
   min-height: 1.1em;
 }
+
+/* Listening row with pulsing dot */
+.listeningRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.listeningDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: listeningPulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes listeningPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.7);
+  }
+}
+
+/* Understanding arc */
 .understandingWrap {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .understandingPct {
   font-family: var(--serif, Georgia, serif);
-  font-size: 0.875rem;
+  font-size: 1rem;
   color: var(--text);
   line-height: 1;
-  min-width: 26px;
+  min-width: 28px;
+  font-weight: 500;
 }
 .understandingLabel {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
+  font-weight: 600;
 }
 
 /* Wave visualizer */
@@ -325,12 +359,12 @@
   flex-shrink: 0;
 }
 
-/* Multimedia prompt banner */
+/* ── Multimedia prompt banner ── */
 .mediaBanner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   padding: 10px 18px;
   background: var(--accent-dim);
   border-top: 1px solid rgba(245, 78, 0, 0.2);
@@ -346,6 +380,22 @@
 }
 .mediaBannerText strong {
   color: var(--accent);
+}
+.mediaBannerUpload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 .mediaDismiss {
   background: none;
@@ -363,7 +413,7 @@
   color: var(--text);
 }
 
-/* Tone chips */
+/* ── Tone chips ── */
 .toneBar {
   display: flex;
   align-items: center;
@@ -397,7 +447,7 @@
   }
 }
 
-/* Ready banner */
+/* ── Ready banner ── */
 .readyBanner {
   display: flex;
   align-items: center;
@@ -457,7 +507,7 @@
   cursor: not-allowed;
 }
 
-/* Input bar */
+/* ── Input bar ── */
 .inputBar {
   display: flex;
   align-items: flex-end;
@@ -626,6 +676,7 @@
   cursor: not-allowed;
 }
 
+/* ── Mobile ── */
 @media (max-width: 600px) {
   .bubble {
     max-width: 86%;
@@ -640,7 +691,7 @@
   .stage {
     gap: 10px;
     padding: 10px 14px;
-    min-height: 72px;
+    min-height: 70px;
   }
   .stageLeft {
     gap: 10px;

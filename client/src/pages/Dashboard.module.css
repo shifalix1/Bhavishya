@@ -6,23 +6,16 @@
 
 .main {
   flex: 1;
-  overflow-y: auto;
   min-width: 0;
+  position: relative;
 }
 
-/* Aawaz takes full height with no scroll padding */
-.mainAawaz {
-  display: flex;
+/* Aawaz pane: full viewport height, flex column, no scroll - stage pins to bottom */
+.aawazPane {
   flex-direction: column;
-  overflow: hidden;
   height: 100dvh;
-}
-
-.aawazFull {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  overflow: hidden;
+  /* display toggled inline via style prop */
 }
 
 .errorBanner {
@@ -34,17 +27,26 @@
   flex-shrink: 0;
 }
 
+/* All other tabs: scrollable column */
+.contentPane {
+  flex-direction: column;
+  min-height: 100dvh;
+  overflow-y: auto;
+  /* display toggled inline via style prop */
+}
+
 .content {
   max-width: 860px;
   margin: 0 auto;
   padding: 40px 32px;
+  width: 100%;
 }
 
 @media (max-width: 768px) {
+  .aawazPane {
+    height: calc(100dvh - 58px);
+  }
   .content {
     padding: 24px 16px 100px;
-  }
-  .mainAawaz {
-    height: calc(100dvh - 58px); /* leave space for bottom nav */
   }
 }

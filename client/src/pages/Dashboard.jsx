@@ -68,10 +68,17 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
     setTab("margdarshak");
   };
 
-  const renderContent = () => {
-    if (tab === "aawaz") {
-      return (
-        <div className={styles.aawazFull}>
+  return (
+    <div className={styles.layout}>
+      <Sidebar student={student} tab={tab} onTab={setTab} onLogout={onLogout} />
+
+      <main className={styles.main}>
+        {/* Aawaz: always mounted, shown/hidden via CSS so state is never lost */}
+        <div
+          className={styles.aawazPane}
+          style={{ display: tab === "aawaz" ? "flex" : "none" }}
+          aria-hidden={tab !== "aawaz"}
+        >
           {aawazError && <div className={styles.errorBanner}>{aawazError}</div>}
           <Aawaz
             student={student}
@@ -79,51 +86,54 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
             onReadyForDarpan={handleAawazReadyForDarpan}
           />
         </div>
-      );
-    }
-    if (tab === "session") {
-      return (
-        <Session
-          student={student}
-          onIdentityReady={handleIdentityReady}
-          onGoToAawaz={() => setTab("aawaz")}
-        />
-      );
-    }
-    if (tab === "margdarshak") {
-      return (
-        <Margdarshak
-          student={student}
-          onGoToSession={() => setTab("session")}
-          prefillQuestion={margdarshakPrefill}
-          onPrefillUsed={() => setMargdarshakPrefill(null)}
-        />
-      );
-    }
-    if (tab === "futures") {
-      return (
-        <Futures
-          student={student}
-          shouldSimulate={shouldSimulate}
-          onGoToSession={() => setTab("session")}
-          onGoToMargdarshak={handleGoToMargdarshak}
-        />
-      );
-    }
-    return null;
-  };
 
-  const isAawazTab = tab === "aawaz";
+        {/* Session tab */}
+        <div
+          className={styles.contentPane}
+          style={{ display: tab === "session" ? "flex" : "none" }}
+          aria-hidden={tab !== "session"}
+        >
+          <div className={styles.content}>
+            <Session
+              student={student}
+              onIdentityReady={handleIdentityReady}
+              onGoToAawaz={() => setTab("aawaz")}
+              onGoToMargdarshak={handleGoToMargdarshak}
+            />
+          </div>
+        </div>
 
-  return (
-    <div className={styles.layout}>
-      <Sidebar student={student} tab={tab} onTab={setTab} onLogout={onLogout} />
-      <main className={`${styles.main} ${isAawazTab ? styles.mainAawaz : ""}`}>
-        {isAawazTab ? (
-          renderContent()
-        ) : (
-          <div className={styles.content}>{renderContent()}</div>
-        )}
+        {/* Margdarshak tab */}
+        <div
+          className={styles.contentPane}
+          style={{ display: tab === "margdarshak" ? "flex" : "none" }}
+          aria-hidden={tab !== "margdarshak"}
+        >
+          <div className={styles.content}>
+            <Margdarshak
+              student={student}
+              onGoToSession={() => setTab("session")}
+              prefillQuestion={margdarshakPrefill}
+              onPrefillUsed={() => setMargdarshakPrefill(null)}
+            />
+          </div>
+        </div>
+
+        {/* Futures tab */}
+        <div
+          className={styles.contentPane}
+          style={{ display: tab === "futures" ? "flex" : "none" }}
+          aria-hidden={tab !== "futures"}
+        >
+          <div className={styles.content}>
+            <Futures
+              student={student}
+              shouldSimulate={shouldSimulate}
+              onGoToSession={() => setTab("session")}
+              onGoToMargdarshak={handleGoToMargdarshak}
+            />
+          </div>
+        </div>
       </main>
     </div>
   );
