@@ -1,0 +1,237 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 8px 0 40px;
+  max-width: 640px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.greeting {
+  font-family: var(--serif, Georgia, serif);
+  font-size: clamp(1.5rem, 3.5vw, 2rem);
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.sub {
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* 2x2 grid */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  border-radius: var(--r-lg, 14px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.1s;
+  position: relative;
+}
+
+.card:hover {
+  border-color: var(--border-warm);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-1px);
+}
+
+.card:active {
+  transform: translateY(0);
+}
+
+.cardAccent {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.cardAccent:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 20px rgba(245, 78, 0, 0.12);
+}
+
+.cardIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md, 10px);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-sub);
+}
+
+.cardIconAccent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.cardText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cardLabel {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.cardSub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.sessionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--r-pill, 999px);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  align-self: flex-start;
+}
+
+/* Skip/paste text input screen */
+.skipWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0 40px;
+  max-width: 640px;
+}
+
+.backBtn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.15s;
+}
+.backBtn:hover {
+  color: var(--text);
+}
+
+.skipHeading {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 1.5rem;
+  color: var(--text);
+  margin: 0;
+}
+
+.skipSub {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.skipTextarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 180px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  color: var(--text);
+  font-size: 0.9375rem;
+  padding: 14px 16px;
+  line-height: 1.6;
+  font-family: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+  outline: none;
+}
+.skipTextarea::placeholder {
+  color: var(--text-muted);
+}
+.skipTextarea:focus {
+  border-color: var(--accent);
+}
+
+.skipActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.charCount {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.skipSubmit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border-radius: var(--r-md, 10px);
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+.skipSubmit:hover:not(:disabled) {
+  opacity: 0.88;
+}
+.skipSubmit:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.skipHint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,10 +3,6 @@ import { ImagePlus, X, ChevronRight, Globe } from "lucide-react";
 import { api } from "../lib/api";
 import styles from "./Aawaz.module.css";
 
-/**
- * Strips all speak/SSML tags from a raw AI response string.
- * Handles normal tags, escaped variants, markdown bold/italic, and bullet points.
- */
 function cleanText(raw) {
   return raw
     .replace(/\\?<\/?speak>/gi, "")
@@ -17,54 +13,29 @@ function cleanText(raw) {
     .trim();
 }
 
-/**
- * Extracts the English TTS sentence from inside a speak tag block.
- * Falls back to the full cleaned text if no speak block is found.
- */
 function extractSpeakText(raw) {
   const match = raw.match(/\\?<speak>([\s\S]*?)\\?<\/speak>/i);
   return match ? match[1].trim() : cleanText(raw);
 }
 
-/**
- * Returns the best available English voice from the browser's speech synthesis engine.
- * Prefers Google US English, then falls back by locale.
- */
 function pickVoice() {
   const voices = window.speechSynthesis?.getVoices() || [];
+  const enVoices = voices.filter(
+    (v) => v.lang.startsWith("en") && v.lang !== "en-IN",
+  );
   return (
-    voices.find((v) => v.name === "Google US English") ||
-    voices.find((v) => v.name.includes("Google") && v.lang === "en-US") ||
-    voices.find((v) => v.lang === "en-US") ||
-    voices.find((v) => v.lang === "en-GB") ||
-    voices.find((v) => v.lang.startsWith("en-")) ||
-    voices[0] ||
+    enVoices.find((v) => v.name === "Google US English") ||
+    enVoices.find((v) => v.name.includes("Samantha")) ||
+    enVoices.find((v) => v.name.includes("Alex")) ||
+    enVoices.find((v) => v.name.includes("Daniel")) ||
+    enVoices.find((v) => v.lang === "en-US" && v.localService) ||
+    enVoices.find((v) => v.lang === "en-GB" && v.localService) ||
+    enVoices.find((v) => v.lang === "en-US") ||
+    enVoices.find((v) => v.lang === "en-GB") ||
+    enVoices[0] ||
     null
   );
 }
-
-/**
- * Returns the first supported MIME type for MediaRecorder in the current browser.
- * Returns an empty string if none of the preferred types are supported.
- */
-function getSupportedMime() {
-  const types = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/ogg;codecs=opus",
-    "audio/mp4",
-  ];
-  for (const t of types) {
-    try {
-      if (MediaRecorder.isTypeSupported(t)) return t;
-    } catch {
-      // Browser does not support this type, continue checking.
-    }
-  }
-  return "";
-}
-
-// Toast notification component
 
 function Toast({ toasts, onDismiss }) {
   if (!toasts.length) return null;
@@ -85,8 +56,6 @@ function Toast({ toasts, onDismiss }) {
   );
 }
 
-// Main Aawaz component
-
 export default function Aawaz({ student, onReadyForDarpan }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -97,31 +66,29 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   const [understanding, setUnderstanding] = useState(0);
   const [toneSignals, setToneSignals] = useState([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [recState, setRecState] = useState("idle"); // "idle" | "recording" | "processing"
+  const [recState, setRecState] = useState("idle");
   const [recTime, setRecTime] = useState(0);
   const [imagePreview, setImagePreview] = useState(null);
   const [marksheet, setMarksheet] = useState(null);
-  const [waveformBars, setWaveformBars] = useState(Array(14).fill(3));
-  const [blobSeed, setBlobSeed] = useState(0);
-  const [language, setLanguage] = useState("hinglish"); // "hinglish" | "english"
+  const [waveformBars, setWaveformBars] = useState(Array(22).fill(3));
+  const [language, setLanguage] = useState("english");
   const [toasts, setToasts] = useState([]);
   const [audioCtxReady, setAudioCtxReady] = useState(false);
+  const [showMediaPrompt, setShowMediaPrompt] = useState(false);
+  const [mediaPromptDismissed, setMediaPromptDismissed] = useState(false);
 
-  const mrRef = useRef(null);
-  const chunksRef = useRef([]);
+  const recRef = useRef(null);
+  const streamRef = useRef(null);
   const timerRef = useRef(null);
   const audioCtxRef = useRef(null);
   const waveFrameRef = useRef(null);
-  const blobFrameRef = useRef(null);
+  const idleFrameRef = useRef(null);
   const fileRef = useRef(null);
   const bottomRef = useRef(null);
   const initialized = useRef(false);
   const exchangeCount = useRef(0);
-  const silenceStartRef = useRef(null);
-  const mimeRef = useRef("");
   const toastIdRef = useRef(0);
-
-  // Toast management. dismissToast is declared first so addToast can reference it.
+  const idleSeedRef = useRef(0);
 
   const dismissToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -131,15 +98,30 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     (message, type = "error", duration = 4000) => {
       const id = ++toastIdRef.current;
       setToasts((prev) => [...prev, { id, message, type }]);
-      if (duration > 0) {
-        setTimeout(() => dismissToast(id), duration);
-      }
+      if (duration > 0) setTimeout(() => dismissToast(id), duration);
       return id;
     },
     [dismissToast],
   );
 
-  // Text-to-speech: speaks only the English portion inside the speak tag block.
+  // Idle breathing animation
+  useEffect(() => {
+    const BAR_COUNT = 22;
+    const tick = () => {
+      idleSeedRef.current += 1;
+      const t = idleSeedRef.current * 0.035;
+      setWaveformBars((prev) => {
+        if (audioCtxReady) return prev;
+        return Array.from({ length: BAR_COUNT }, (_, i) => {
+          const phase = (i / BAR_COUNT) * Math.PI * 2;
+          return 3 + Math.abs(Math.sin(t + phase) * 6);
+        });
+      });
+      idleFrameRef.current = requestAnimationFrame(tick);
+    };
+    idleFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(idleFrameRef.current);
+  }, [audioCtxReady]);
 
   const speak = useCallback((rawText) => {
     if (!window.speechSynthesis) return;
@@ -151,7 +133,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       const voice = pickVoice();
       if (voice) utt.voice = voice;
       utt.lang = "en-US";
-      utt.rate = 0.93;
+      utt.rate = 0.92;
       utt.pitch = 1.0;
       utt.onstart = () => setIsSpeaking(true);
       utt.onend = () => setIsSpeaking(false);
@@ -171,8 +153,6 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     window.speechSynthesis?.cancel();
     setIsSpeaking(false);
   }, []);
-
-  // Tone heuristic: derives signal labels from user message content.
 
   const detectTone = useCallback((text) => {
     const t = text.toLowerCase();
@@ -198,108 +178,50 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     );
   }, []);
 
-  // Blob orb animation loop
-
-  useEffect(() => {
-    let frame;
-    const tick = () => {
-      setBlobSeed((s) => s + 1);
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    blobFrameRef.current = frame;
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  // Initialise component: set MIME type and display the opener message.
-
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    mimeRef.current = getSupportedMime();
-
     const opener = student.is_returning
-      ? `<speak>${student.name}, you're back. What changed?</speak> ${student.name}, tu wapas aa gaya. School mein, ghar mein, ya andar - kya badla?`
-      : `<speak>Hey ${student.name}. I'm Aawaz. I'm here to listen, not judge. When you have nothing to do and no one's watching - what do you naturally drift towards?</speak> Hey ${student.name}. Main Aawaz hoon - judge karne nahi aaya, sunne aaya hoon. Jab koi nahi dekh raha aur time free ho, toh tu naturally kya karne lagta hai?`;
-
-    setMessages([{ role: "aawaz", content: cleanText(opener) }]);
+      ? `${student.name}, you're back. What changed since we last spoke?`
+      : `Hey ${student.name}. I'm Aawaz. I'm here to listen, not judge. When you have nothing to do and no one's watching, what do you naturally drift towards?`;
+    setMessages([{ role: "aawaz", content: opener }]);
     speak(opener);
   }, [speak, student]);
-
-  // Auto-scroll to the latest message
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, aiLoading]);
 
-  // Cleanup all active resources on unmount
-
   useEffect(
     () => () => {
       clearInterval(timerRef.current);
       cancelAnimationFrame(waveFrameRef.current);
-      cancelAnimationFrame(blobFrameRef.current);
+      cancelAnimationFrame(idleFrameRef.current);
       audioCtxRef.current?.close();
-      if (mrRef.current?.state !== "inactive") mrRef.current?.stop();
+      recRef.current?.abort?.();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
       window.speechSynthesis?.cancel();
     },
     [],
   );
 
-  // stopRec is declared before startWaveform so the waveform loop can reference it.
-
-  const stopRec = useCallback(() => {
-    clearInterval(timerRef.current);
-    cancelAnimationFrame(waveFrameRef.current);
-    if (mrRef.current?.state !== "inactive") mrRef.current?.stop();
-  }, []);
-
-  /**
-   * Drives waveform bar heights from analyser frequency data.
-   * Handles silence detection: stops recording after SILENCE_DELAY ms of quiet.
-   */
-  const startWaveform = useCallback(
-    (analyser) => {
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const BAR_COUNT = 14;
-      const SILENCE_THRESH = 6;
-      const SILENCE_DELAY = 1800;
-      const frame = () => {
-        analyser.getByteTimeDomainData(data);
-        const step = Math.floor(data.length / BAR_COUNT);
-        setWaveformBars(
-          Array.from({ length: BAR_COUNT }, (_, i) => {
-            let sum = 0;
-            for (let j = 0; j < step; j++) {
-              const v = (data[i * step + j] - 128) / 128;
-              sum += v * v;
-            }
-            return Math.max(2, Math.min(30, Math.sqrt(sum / step) * 220));
-          }),
-        );
-        let total = 0;
-        for (let i = 0; i < data.length; i++) {
-          const v = (data[i] - 128) / 128;
-          total += v * v;
-        }
-        const rms = Math.sqrt(total / data.length) * 100;
-        if (rms < SILENCE_THRESH) {
-          if (!silenceStartRef.current) silenceStartRef.current = Date.now();
-          else if (Date.now() - silenceStartRef.current > SILENCE_DELAY) {
-            stopRec();
-            return;
-          }
-        } else {
-          silenceStartRef.current = null;
-        }
-        waveFrameRef.current = requestAnimationFrame(frame);
-      };
+  const startWaveform = useCallback((analyser) => {
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const BAR_COUNT = 22;
+    const frame = () => {
+      analyser.getByteFrequencyData(data);
+      const step = Math.floor(data.length / BAR_COUNT);
+      setWaveformBars(
+        Array.from({ length: BAR_COUNT }, (_, i) => {
+          let sum = 0;
+          for (let j = 0; j < step; j++) sum += data[i * step + j];
+          return Math.max(3, Math.min(44, (sum / step / 255) * 44));
+        }),
+      );
       waveFrameRef.current = requestAnimationFrame(frame);
-    },
-    [stopRec],
-  );
-
-  // Sends a message to the Aawaz chat API and handles the response.
+    };
+    waveFrameRef.current = requestAnimationFrame(frame);
+  }, []);
 
   const send = useCallback(
     async (textOverride) => {
@@ -307,22 +229,28 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       if (!text || aiLoading || darpanLoading) return;
       setInput("");
       stopSpeaking();
-
-      // Compute merged signals synchronously to avoid stale closure issues.
       const newSignals = detectTone(text);
       const mergedSignals = [...new Set([...toneSignals, ...newSignals])].slice(
         -7,
       );
       setToneSignals(mergedSignals);
-
       exchangeCount.current += 1;
       setMessages((m) => [...m, { role: "user", content: text }]);
       setAiLoading(true);
 
+      // Show media prompt after 3rd exchange if no image yet and not dismissed
+      if (
+        exchangeCount.current === 3 &&
+        !imagePreview &&
+        !marksheet &&
+        !mediaPromptDismissed
+      ) {
+        setShowMediaPrompt(true);
+      }
+
       const payload = marksheet
         ? `${text}\n\n[Marksheet:\n${marksheet}]`
         : text;
-
       try {
         const res = await api.aawazChat(
           student.name,
@@ -335,18 +263,14 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         setMessages((m) => [...m, { role: "aawaz", content: clean }]);
         speak(res.response);
         updateUnderstanding(exchangeCount.current, mergedSignals);
-
         if (res.ready_for_darpan && !ready) {
           setReady(true);
           setCombinedInput(res.combined_input);
           setUnderstanding(95);
+          setShowMediaPrompt(false);
         }
       } catch (err) {
         console.error("[AAWAZ/SEND]", err);
-        const isOffline = !navigator.onLine;
-        const toastMsg = isOffline
-          ? "You appear to be offline. Trying local model..."
-          : "Something went wrong reaching the server. Try again.";
         setMessages((m) => [
           ...m,
           {
@@ -354,7 +278,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             content: "Something went wrong. Try again in a moment.",
           },
         ]);
-        addToast(toastMsg, "error");
+        addToast("Could not reach the server. Check your connection.", "error");
       } finally {
         setAiLoading(false);
       }
@@ -373,6 +297,8 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       detectTone,
       updateUnderstanding,
       addToast,
+      imagePreview,
+      mediaPromptDismissed,
     ],
   );
 
@@ -383,103 +309,101 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     }
   };
 
-  // Starts microphone recording and initialises AudioContext for waveform visualisation.
+  const stopRec = useCallback(() => {
+    clearInterval(timerRef.current);
+    cancelAnimationFrame(waveFrameRef.current);
+    recRef.current?.stop();
+  }, []);
 
   const startRec = useCallback(async () => {
-    chunksRef.current = [];
-    silenceStartRef.current = null;
-    stopSpeaking();
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = mimeRef.current;
-      const mr = mime
-        ? new MediaRecorder(stream, { mimeType: mime })
-        : new MediaRecorder(stream);
-      mrRef.current = mr;
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      mr.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        cancelAnimationFrame(waveFrameRef.current);
-        audioCtxRef.current?.close();
-        setAudioCtxReady(false);
-        setWaveformBars(Array(14).fill(3));
-        setRecState("processing");
-        const actualMime = mr.mimeType || mime || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type: actualMime });
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const b64 = reader.result.split(",")[1];
-          try {
-            const res = await api.aawazTranscribe(
-              student.name,
-              student.grade,
-              student.uid,
-              {
-                audio_b64: b64,
-                audio_mime: actualMime,
-              },
-            );
-            if (res.transcript?.trim()) {
-              setRecState("idle");
-              setRecTime(0);
-              send(res.transcript.trim());
-              return;
-            }
-          } catch (err) {
-            console.error("[AAWAZ/TRANSCRIBE]", err);
-            addToast(
-              "Voice transcription failed. Please type your message instead.",
-              "warning",
-            );
-          }
-          setRecState("idle");
-          setRecTime(0);
-        };
-        reader.readAsDataURL(blob);
-      };
-      mr.start(200);
-      setRecState("recording");
-      setRecTime(0);
-      timerRef.current = setInterval(() => setRecTime((t) => t + 1), 1000);
-
-      // AudioContext is wrapped in try/catch because Safari and iOS often block it
-      // until a direct user gesture. The CSS fallback animation activates instead.
-      try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const ctx = new AudioCtx();
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 512;
-        ctx.createMediaStreamSource(stream).connect(analyser);
-        audioCtxRef.current = ctx;
-        setAudioCtxReady(true);
-        startWaveform(analyser);
-      } catch {
-        setAudioCtxReady(false);
-        console.warn("[AAWAZ] AudioContext unavailable, using CSS fallback.");
-      }
-    } catch {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
       addToast(
-        "Microphone access denied. Please allow mic permissions and try again.",
+        "Voice input not supported in this browser. Type instead.",
         "warning",
       );
+      return;
     }
-  }, [stopSpeaking, send, addToast, startWaveform, student]);
 
-  /**
-   * Handles image uploads. Detects marksheets and routes the description to the
-   * chat payload for any other image type.
-   */
+    stopSpeaking();
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audioCtxRef.current = ctx;
+      setAudioCtxReady(true);
+      startWaveform(analyser);
+    } catch {
+      // no waveform, continue
+    }
+
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = language === "hinglish" ? "hi-IN" : "en-US";
+    rec.continuous = false;
+    rec.interimResults = true;
+
+    setRecState("recording");
+    setRecTime(0);
+    timerRef.current = setInterval(() => setRecTime((t) => t + 1), 1000);
+
+    let finalTranscript = "";
+
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript;
+        } else {
+          interim += e.results[i][0].transcript;
+        }
+      }
+      setInput(finalTranscript + interim);
+    };
+
+    rec.onend = () => {
+      clearInterval(timerRef.current);
+      cancelAnimationFrame(waveFrameRef.current);
+      audioCtxRef.current?.close().catch(() => {});
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      setAudioCtxReady(false);
+      setRecState("idle");
+      setRecTime(0);
+      const text = finalTranscript.trim();
+      if (text) {
+        setInput("");
+        send(text);
+      }
+    };
+
+    rec.onerror = (e) => {
+      if (e.error !== "no-speech" && e.error !== "aborted") {
+        addToast("Could not hear you clearly. Please type.", "warning");
+      }
+    };
+
+    try {
+      rec.start();
+    } catch {
+      addToast("Could not start voice input. Please type.", "warning");
+      setRecState("idle");
+    }
+  }, [stopSpeaking, send, addToast, startWaveform, language]);
+
   const handleImage = useCallback(
     async (e) => {
       const file = e.target.files?.[0];
       if (!file || !file.type.startsWith("image/")) return;
-
+      setShowMediaPrompt(false);
+      setMediaPromptDismissed(true);
       const previewReader = new FileReader();
       previewReader.onload = (ev) => setImagePreview(ev.target.result);
       previewReader.readAsDataURL(file);
-
       const b64Reader = new FileReader();
       b64Reader.onloadend = async () => {
         const b64 = b64Reader.result.split(",")[1];
@@ -497,12 +421,11 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         } catch (err) {
           console.error("[AAWAZ/IMAGE]", err);
           addToast(
-            "Could not analyse the image. You can still describe it in text.",
+            "Could not analyse the image. Describe it in text instead.",
             "warning",
           );
           return;
         }
-
         if (res.marksheet_data) {
           setMarksheet(res.marksheet_data);
           const ackMsg = {
@@ -522,7 +445,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           send(`[Image uploaded: ${res.image_description}]`);
         } else {
           addToast(
-            "Image uploaded but could not be analysed. Try typing about it instead.",
+            "Image uploaded but could not be analysed. Try typing about it.",
             "info",
           );
         }
@@ -552,7 +475,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
 
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-  const orbState = isSpeaking
+  const waveState = isSpeaking
     ? "speaking"
     : recState === "recording"
       ? "listening"
@@ -580,10 +503,10 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         </div>
       </div>
 
-      {/* Stage area with orb and understanding arc */}
+      {/* Stage bar */}
       <div className={styles.stage}>
-        <AmoebaOrb state={orbState} seed={blobSeed} bars={waveformBars} />
-        <div className={styles.stageRight}>
+        <div className={styles.stageLeft}>
+          <WaveVisualizer bars={waveformBars} state={waveState} />
           <div className={styles.stageInfo}>
             <div className={styles.stageNameRow}>
               <span className={styles.stageName}>Aawaz</span>
@@ -597,13 +520,15 @@ export default function Aawaz({ student, onReadyForDarpan }) {
               </button>
             </div>
             <span className={styles.stageStatus}>
-              {orbState === "speaking" && "Speaking..."}
-              {orbState === "listening" && `Listening  ${fmt(recTime)}`}
-              {orbState === "processing" && "Transcribing..."}
-              {orbState === "thinking" && "Thinking..."}
-              {orbState === "idle" && "Here"}
+              {waveState === "speaking" && "Speaking..."}
+              {waveState === "listening" && `Listening  ${fmt(recTime)}`}
+              {waveState === "processing" && "Processing..."}
+              {waveState === "thinking" && "Thinking..."}
+              {waveState === "idle" && "Here"}
             </span>
           </div>
+        </div>
+        <div className={styles.stageRight}>
           <div className={styles.understandingWrap}>
             <UnderstandingArc value={understanding} />
             <span className={styles.understandingPct}>{understanding}%</span>
@@ -619,6 +544,53 @@ export default function Aawaz({ student, onReadyForDarpan }) {
               {s}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Multimedia prompt banner - appears after 3rd exchange */}
+      {showMediaPrompt && !ready && (
+        <div className={styles.mediaBanner}>
+          <p className={styles.mediaBannerText}>
+            <strong>Show me something.</strong> A marksheet, a project photo, a
+            sketch — anything real. It tells me more than words.
+          </p>
+          <label
+            style={{
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 14px",
+              borderRadius: 8,
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: "0.8125rem",
+              fontWeight: 600,
+              fontFamily: "inherit",
+              border: "none",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            <ImagePlus size={13} />
+            Upload
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImage}
+              style={{ display: "none" }}
+            />
+          </label>
+          <button
+            className={styles.mediaDismiss}
+            onClick={() => {
+              setShowMediaPrompt(false);
+              setMediaPromptDismissed(true);
+            }}
+          >
+            Skip
+          </button>
         </div>
       )}
 
@@ -655,7 +627,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             >
               <ImagePlus size={15} />
               <input
-                ref={fileRef}
+                ref={!showMediaPrompt ? fileRef : undefined}
                 type="file"
                 accept="image/*"
                 onChange={handleImage}
@@ -678,11 +650,9 @@ export default function Aawaz({ student, onReadyForDarpan }) {
             placeholder={
               recState === "recording"
                 ? `${fmt(recTime)}  Listening...`
-                : recState === "processing"
-                  ? "Transcribing..."
-                  : language === "hinglish"
-                    ? "Hinglish ya English mein type kar..."
-                    : "Type anything, or tap the mic..."
+                : language === "hinglish"
+                  ? "Hinglish ya English mein type kar..."
+                  : "Type anything, or tap the mic..."
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -699,18 +669,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
           title={recState === "recording" ? "Stop" : "Speak"}
         >
           {recState === "recording" ? (
-            <span
-              className={`${styles.waveform} ${!audioCtxReady ? styles.waveformFallback : ""}`}
-              aria-hidden="true"
-            >
-              {waveformBars.map((h, i) => (
-                <span
-                  key={`bar-${i}`}
-                  className={styles.waveBar}
-                  style={{ height: `${h}px` }}
-                />
-              ))}
-            </span>
+            <StopIcon />
           ) : recState === "processing" ? (
             <span className={styles.typingDots}>
               <span />
@@ -739,91 +698,38 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   );
 }
 
-// Sub-components
+function WaveVisualizer({ bars, state }) {
+  const isActive = state === "listening" || state === "speaking";
+  const color =
+    state === "listening" || state === "speaking"
+      ? "var(--accent)"
+      : state === "thinking"
+        ? "var(--gold)"
+        : "var(--border-warm)";
 
-function AmoebaOrb({ state, seed, bars }) {
-  const t = seed * 0.016;
-  const activity =
-    state === "speaking"
-      ? 1.0
-      : state === "listening"
-        ? 0.85
-        : state === "thinking"
-          ? 0.5
-          : 0.2;
-  const points = 12;
-
-  const coords = Array.from({ length: points }, (_, i) => {
-    const angle = (i / points) * Math.PI * 2;
-    const noise =
-      Math.sin(angle * 2 + t * 1.1) * 7 * activity +
-      Math.sin(angle * 3 - t * 0.7) * 4 * activity +
-      Math.sin(angle * 5 + t * 1.5) * 2.5 * activity +
-      Math.cos(angle * 2 + t * 0.9) * 3 * activity;
-    const barIdx = Math.floor((i / points) * bars.length);
-    const barAmp = state === "listening" ? (bars[barIdx] / 30) * 7 : 0;
-    const r = 32 + noise + barAmp;
-    return [50 + r * Math.cos(angle), 50 + r * Math.sin(angle)];
-  });
-
-  const d =
-    coords
-      .map((p, i) => {
-        const prev = coords[(i - 1 + points) % points];
-        const next = coords[(i + 1) % points];
-        const cpx = p[0] + (next[0] - prev[0]) * 0.18;
-        const cpy = p[1] + (next[1] - prev[1]) * 0.18;
-        return i === 0 ? `M${p[0]},${p[1]}` : `Q${cpx},${cpy},${p[0]},${p[1]}`;
-      })
-      .join(" ") + "Z";
-
-  const g1 =
-    state === "listening"
-      ? "#ffb347"
-      : state === "speaking"
-        ? "#ff6b35"
-        : state === "thinking"
-          ? "#ffcc44"
-          : "#ff8c42";
-  const g2 =
-    state === "listening"
-      ? "#ff6b35"
-      : state === "speaking"
-        ? "#ff3d00"
-        : state === "thinking"
-          ? "#f7a825"
-          : "#f54e00";
-  const glow =
-    state === "speaking"
-      ? "rgba(255,61,0,0.4)"
-      : state === "listening"
-        ? "rgba(255,107,53,0.32)"
-        : "rgba(245,78,0,0.22)";
+  const midpoint = Math.floor(bars.length / 2);
 
   return (
-    <svg
-      viewBox="0 0 100 100"
-      width="84"
-      height="84"
-      style={{
-        filter: `drop-shadow(0 0 14px ${glow})`,
-        overflow: "visible",
-        flexShrink: 0,
-      }}
-    >
-      <defs>
-        <radialGradient id="aawaz_bg1" cx="40%" cy="36%" r="65%">
-          <stop offset="0%" stopColor={g1} />
-          <stop offset="100%" stopColor={g2} />
-        </radialGradient>
-        <radialGradient id="aawaz_bg2" cx="34%" cy="30%" r="42%">
-          <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
-          <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-        </radialGradient>
-      </defs>
-      <path d={d} fill="url(#aawaz_bg1)" />
-      <path d={d} fill="url(#aawaz_bg2)" />
-    </svg>
+    <div className={styles.waveViz} aria-hidden="true">
+      {bars.map((h, i) => {
+        const distFromCenter = Math.abs(i - midpoint) / midpoint;
+        const scaledH = h * (1 - distFromCenter * 0.3);
+        return (
+          <span
+            key={i}
+            className={styles.waveVizBar}
+            style={{
+              height: `${Math.max(3, scaledH)}px`,
+              background: color,
+              opacity: isActive ? 0.8 + (1 - distFromCenter) * 0.2 : 0.5,
+              transition: isActive
+                ? "height 0.05s ease, opacity 0.2s"
+                : "height 0.4s ease, opacity 0.4s",
+            }}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -908,6 +814,14 @@ function MicIcon() {
       <path d="M5 10a7 7 0 0 0 14 0" />
       <line x1="12" y1="19" x2="12" y2="22" />
       <line x1="8" y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
     </svg>
   );
 }

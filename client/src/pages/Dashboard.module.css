@@ -1,0 +1,50 @@
+.layout {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* Aawaz takes full height with no scroll padding */
+.mainAawaz {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100dvh;
+}
+
+.aawazFull {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.errorBanner {
+  padding: 10px 20px;
+  background: rgba(220, 60, 60, 0.1);
+  border-bottom: 1px solid rgba(220, 60, 60, 0.22);
+  color: var(--error);
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.content {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+
+@media (max-width: 768px) {
+  .content {
+    padding: 24px 16px 100px;
+  }
+  .mainAawaz {
+    height: calc(100dvh - 58px); /* leave space for bottom nav */
+  }
+}

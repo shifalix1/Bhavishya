@@ -1,3 +1,4 @@
+/* Aawaz - fully theme-aware, no hardcoded dark */
 .root {
   display: flex;
   flex-direction: column;
@@ -8,8 +9,7 @@
   color: var(--text);
 }
 
-/* Toast notifications */
-
+/* Toast */
 .toastStack {
   position: absolute;
   top: 12px;
@@ -23,7 +23,6 @@
   max-width: min(90vw, 420px);
   pointer-events: none;
 }
-
 .toast {
   display: flex;
   align-items: center;
@@ -35,10 +34,7 @@
   line-height: 1.4;
   pointer-events: all;
   animation: toastIn 0.2s cubic-bezier(0.34, 1.3, 0.64, 1) both;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
-
 @keyframes toastIn {
   from {
     opacity: 0;
@@ -49,25 +45,21 @@
     transform: translateY(0) scale(1);
   }
 }
-
 .toast_error {
   background: rgba(220, 60, 60, 0.92);
   color: #fff;
   border: 1px solid rgba(255, 100, 100, 0.3);
 }
-
 .toast_warning {
-  background: rgba(200, 140, 20, 0.92);
+  background: rgba(180, 120, 10, 0.95);
   color: #fff;
   border: 1px solid rgba(255, 200, 60, 0.3);
 }
-
 .toast_info {
   background: rgba(40, 100, 200, 0.92);
   color: #fff;
   border: 1px solid rgba(100, 160, 255, 0.3);
 }
-
 .toastClose {
   background: none;
   border: none;
@@ -77,37 +69,34 @@
   padding: 2px;
   display: flex;
   align-items: center;
-  flex-shrink: 0;
   border-radius: 4px;
-  transition: opacity 0.15s;
 }
 .toastClose:hover {
   opacity: 1;
 }
 
 /* Messages */
-
 .messagesArea {
   flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  mask-image: linear-gradient(to bottom, transparent 0%, black 44px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 44px);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 52px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 52px);
+  background: var(--bg);
 }
-
 .messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 36px 22px 16px;
+  gap: 10px;
+  padding: 40px 24px 20px;
   scroll-behavior: smooth;
+  background: var(--bg);
 }
-
 .messages::-webkit-scrollbar {
   width: 3px;
 }
@@ -115,19 +104,17 @@
   background: transparent;
 }
 .messages::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--border-warm);
   border-radius: 4px;
 }
 
 /* Bubbles */
-
 .bubbleRow {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  animation: bubbleIn 0.2s cubic-bezier(0.34, 1.3, 0.64, 1) both;
+  animation: bubbleIn 0.22s cubic-bezier(0.34, 1.3, 0.64, 1) both;
 }
-
 @keyframes bubbleIn {
   from {
     opacity: 0;
@@ -138,7 +125,6 @@
     transform: translateY(0) scale(1);
   }
 }
-
 .userRow {
   justify-content: flex-end;
 }
@@ -154,6 +140,7 @@
   flex-shrink: 0;
   margin-bottom: 3px;
   position: relative;
+  opacity: 0.85;
 }
 .aawazDot::after {
   content: "";
@@ -161,28 +148,26 @@
   inset: 4px;
   border-radius: 50%;
   background: var(--bg);
-  opacity: 0.88;
+  opacity: 0.85;
 }
 
 .bubble {
   max-width: 72%;
-  padding: 10px 15px;
+  padding: 11px 16px;
   border-radius: 20px;
   font-size: 0.9375rem;
   line-height: 1.65;
   white-space: pre-wrap;
 }
-
 .aawazBubble {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-warm);
   color: var(--text);
   border-bottom-left-radius: 5px;
 }
 .lastBubble {
   border-color: var(--border-warm);
 }
-
 .userBubble {
   background: var(--accent);
   color: #fff;
@@ -190,7 +175,6 @@
 }
 
 /* Typing dots */
-
 .typingDots {
   display: inline-flex;
   align-items: center;
@@ -210,7 +194,6 @@
 .typingDots span:nth-child(3) {
   animation-delay: 0.36s;
 }
-
 @keyframes typingBounce {
   0%,
   60%,
@@ -222,55 +205,55 @@
   }
 }
 
-/* Stage */
-
+/* Stage bar - horizontal layout, fully theme-aware */
 .stage {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 20px;
-  height: 116px;
-  min-height: 116px;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 88px;
   flex-shrink: 0;
-  padding: 16px 24px;
+  padding: 12px 20px;
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
-
+.stageLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
 .stageRight {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 130px;
+  gap: 4px;
+  align-items: flex-end;
+  flex-shrink: 0;
 }
-
 .stageInfo {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
-
-/* Name row - flex so lang toggle sits inline */
 .stageNameRow {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-
 .stageName {
   font-family: var(--serif, Georgia, serif);
   font-size: 1rem;
   color: var(--text);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
 }
-
-/* Language toggle pill */
 .langToggle {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 20px;
   border: 1px solid var(--border);
   background: var(--surface-alt);
@@ -292,66 +275,117 @@
 .langEn {
   border-color: var(--accent);
   color: var(--accent);
-  background: var(--accent-dim, rgba(100, 80, 255, 0.08));
+  background: var(--accent-dim);
 }
 .langHi {
-  border-color: var(--gold, #c9a227);
-  color: var(--gold, #c9a227);
-  background: var(--gold-dim, rgba(201, 162, 39, 0.06));
+  border-color: var(--gold);
+  color: var(--gold);
+  background: var(--gold-dim);
 }
-
 .stageStatus {
   font-size: 0.75rem;
   color: var(--text-muted);
   min-height: 1.1em;
 }
-
 .understandingWrap {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
 }
 .understandingPct {
   font-family: var(--serif, Georgia, serif);
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   color: var(--text);
   line-height: 1;
-  min-width: 30px;
+  min-width: 26px;
 }
 .understandingLabel {
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-/*Tone chips */
+/* Wave visualizer */
+.waveViz {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 44px;
+  flex-shrink: 0;
+  width: 88px;
+  justify-content: center;
+}
+.waveVizBar {
+  display: block;
+  width: 3px;
+  border-radius: 4px;
+  min-height: 3px;
+  flex-shrink: 0;
+}
 
+/* Multimedia prompt banner */
+.mediaBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--accent-dim);
+  border-top: 1px solid rgba(245, 78, 0, 0.2);
+  flex-shrink: 0;
+  animation: bubbleIn 0.25s ease both;
+}
+.mediaBannerText {
+  font-size: 0.8125rem;
+  color: var(--text-sub);
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+}
+.mediaBannerText strong {
+  color: var(--accent);
+}
+.mediaDismiss {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.mediaDismiss:hover {
+  color: var(--text);
+}
+
+/* Tone chips */
 .toneBar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 5px;
-  padding: 7px 18px;
-  background: var(--gold-dim, rgba(201, 162, 39, 0.06));
+  padding: 8px 20px;
+  background: var(--gold-dim);
   border-top: 1px solid rgba(201, 162, 39, 0.12);
-  border-bottom: 1px solid rgba(201, 162, 39, 0.12);
   flex-shrink: 0;
 }
-
 .toneChip {
   display: inline-flex;
   align-items: center;
   padding: 3px 9px;
   border-radius: 20px;
   background: var(--surface);
-  border: 1px solid rgba(201, 162, 39, 0.22);
+  border: 1px solid rgba(201, 162, 39, 0.2);
   color: var(--gold);
   font-size: 0.6875rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
   animation: chipIn 0.18s ease both;
 }
-
 @keyframes chipIn {
   from {
     opacity: 0;
@@ -364,19 +398,17 @@
 }
 
 /* Ready banner */
-
 .readyBanner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 13px 18px;
-  background: var(--success-dim, rgba(31, 138, 101, 0.08));
-  border-top: 1px solid rgba(31, 138, 101, 0.22);
+  padding: 14px 20px;
+  background: var(--success-dim);
+  border-top: 1px solid rgba(31, 138, 101, 0.25);
   flex-shrink: 0;
   animation: bubbleIn 0.3s ease both;
 }
-
 .readyText {
   display: flex;
   flex-direction: column;
@@ -394,13 +426,12 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-
 .darpanBtn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 9px 18px;
-  border-radius: var(--r-md, 10px);
+  border-radius: 10px;
   background: var(--text);
   color: var(--bg);
   border: none;
@@ -427,29 +458,26 @@
 }
 
 /* Input bar */
-
 .inputBar {
   display: flex;
   align-items: flex-end;
   gap: 7px;
-  padding: 10px 14px 16px;
+  padding: 10px 16px 18px;
   flex-shrink: 0;
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
-
 .uploadSlot {
   flex-shrink: 0;
 }
-
 .uploadBtn {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
-  border-radius: var(--r-md, 10px);
-  border: 1.5px dashed var(--border-warm, var(--border));
+  border-radius: 10px;
+  border: 1.5px dashed var(--border-warm);
   color: var(--text-muted);
   cursor: pointer;
   transition:
@@ -460,12 +488,11 @@
   border-color: var(--accent);
   color: var(--accent);
 }
-
 .thumbWrap {
   position: relative;
   width: 38px;
   height: 38px;
-  border-radius: var(--r-md, 10px);
+  border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
 }
@@ -482,7 +509,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   border: none;
   color: #fff;
   display: flex;
@@ -491,7 +518,6 @@
   cursor: pointer;
   padding: 0;
 }
-
 .textWrap {
   flex: 1;
   min-width: 0;
@@ -503,11 +529,11 @@
   max-height: 100px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: var(--r-md, 10px);
+  border-radius: 10px;
   color: var(--text);
   font-size: 0.9375rem;
   padding: 9px 13px;
-  line-height: 1.4;
+  line-height: 1.5;
   font-family: inherit;
   box-sizing: border-box;
   transition: border-color 0.15s;
@@ -525,12 +551,11 @@
 }
 
 /* Mic button */
-
 .micBtn {
   position: relative;
   width: 38px;
   height: 38px;
-  border-radius: var(--r-md, 10px);
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface-alt);
   color: var(--text-sub);
@@ -552,10 +577,9 @@
 }
 .micActive {
   border-color: var(--accent) !important;
-  background: var(--accent-dim) !important;
-  color: var(--accent) !important;
+  background: var(--accent) !important;
+  color: #fff !important;
 }
-
 .micRing {
   position: absolute;
   inset: -5px;
@@ -576,92 +600,14 @@
   }
 }
 
-/* ─── Waveform ───────────────────────────────────────────────────────────── */
-
-.waveform {
-  display: inline-flex;
-  align-items: center;
-  gap: 1.5px;
-  height: 26px;
-}
-
-.waveBar {
-  display: block;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-  transition: height 0.06s ease;
-  min-height: 2px;
-}
-
-/*
- * CSS-only fallback when AudioContext is blocked (Safari / iOS).
- * Animates bars with pure CSS so recording state still looks alive.
- */
-.waveformFallback .waveBar {
-  animation: waveBarFallback 0.9s ease-in-out infinite alternate;
-}
-.waveformFallback .waveBar:nth-child(1) {
-  animation-delay: 0s;
-}
-.waveformFallback .waveBar:nth-child(2) {
-  animation-delay: 0.07s;
-}
-.waveformFallback .waveBar:nth-child(3) {
-  animation-delay: 0.14s;
-}
-.waveformFallback .waveBar:nth-child(4) {
-  animation-delay: 0.21s;
-}
-.waveformFallback .waveBar:nth-child(5) {
-  animation-delay: 0.28s;
-}
-.waveformFallback .waveBar:nth-child(6) {
-  animation-delay: 0.21s;
-}
-.waveformFallback .waveBar:nth-child(7) {
-  animation-delay: 0.14s;
-}
-.waveformFallback .waveBar:nth-child(8) {
-  animation-delay: 0.07s;
-}
-.waveformFallback .waveBar:nth-child(9) {
-  animation-delay: 0s;
-}
-.waveformFallback .waveBar:nth-child(10) {
-  animation-delay: 0.07s;
-}
-.waveformFallback .waveBar:nth-child(11) {
-  animation-delay: 0.14s;
-}
-.waveformFallback .waveBar:nth-child(12) {
-  animation-delay: 0.21s;
-}
-.waveformFallback .waveBar:nth-child(13) {
-  animation-delay: 0.28s;
-}
-.waveformFallback .waveBar:nth-child(14) {
-  animation-delay: 0.14s;
-}
-
-@keyframes waveBarFallback {
-  0% {
-    height: 3px;
-  }
-  100% {
-    height: 22px;
-  }
-}
-
 /* Send button */
-
 .sendBtn {
   width: 38px;
   height: 38px;
-  border-radius: var(--r-md, 10px);
+  border-radius: 10px;
   border: none;
-  background: var(--text);
-  color: var(--bg);
+  background: var(--accent);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -670,7 +616,6 @@
   transition:
     opacity 0.15s,
     transform 0.1s;
-  font-family: inherit;
 }
 .sendBtn:hover:not(:disabled) {
   opacity: 0.85;
@@ -681,32 +626,37 @@
   cursor: not-allowed;
 }
 
-/* Responsive */
-
 @media (max-width: 600px) {
   .bubble {
     max-width: 86%;
   }
   .inputBar {
-    padding: 8px 10px 14px;
+    padding: 8px 10px 16px;
     gap: 6px;
   }
   .messages {
-    padding: 28px 14px 14px;
+    padding: 32px 14px 16px;
   }
   .stage {
-    gap: 14px;
-    padding: 12px 16px;
-    height: 108px;
-    min-height: 108px;
+    gap: 10px;
+    padding: 10px 14px;
+    min-height: 72px;
   }
-  .stageRight {
-    min-width: 100px;
+  .stageLeft {
+    gap: 10px;
+  }
+  .waveViz {
+    width: 60px;
+    height: 36px;
   }
   .readyBanner {
     flex-wrap: wrap;
   }
-  .toastStack {
-    top: 8px;
+  .mediaBanner {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .understandingLabel {
+    display: none;
   }
 }

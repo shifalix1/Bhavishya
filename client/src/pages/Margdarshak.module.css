@@ -1,0 +1,337 @@
+/* Margdarshak - guide layer */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  max-width: 700px;
+  padding-bottom: 64px;
+}
+
+/* Page header */
+.pageHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pageTag {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 1.375rem;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.pageTagSub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Opening line - mirror moment */
+.openingBlock {
+  padding: 2px 0 2px 20px;
+  border-left: 3px solid var(--accent);
+}
+
+.openingLine {
+  font-family: var(--serif, Georgia, serif);
+  font-size: clamp(1.2rem, 3vw, 1.5625rem);
+  font-style: italic;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* Section wrapper */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Section label */
+.sectionLabel {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Current read */
+.currentRead {
+  font-size: 1rem;
+  line-height: 1.85;
+  color: var(--text-sub);
+  margin: 0;
+}
+
+/* Rule */
+.rule {
+  height: 1px;
+  background: var(--border);
+  width: 100%;
+}
+
+/* Move card - left-bordered, colored by type */
+.moveCard {
+  background: var(--card, #fff);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--move-color, var(--accent));
+  border-radius: 0 var(--r-lg, 14px) var(--r-lg, 14px) 0;
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: var(--shadow-card);
+}
+
+.moveBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--r-pill, 999px);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  background: transparent;
+  align-self: flex-start;
+}
+
+.moveAction {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.moveWhy {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* Watch for row */
+.watchRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
+.watchLabel {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--gold, #c9a227);
+  flex-shrink: 0;
+  padding-top: 1px;
+  white-space: nowrap;
+}
+
+.watchText {
+  font-size: 0.875rem;
+  color: var(--text-sub);
+  font-style: italic;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Question section */
+.questionHead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.questionSub {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.questionInputArea {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.questionInput {
+  min-height: 80px !important;
+  resize: none;
+}
+
+.questionError {
+  font-size: 0.875rem;
+  color: var(--error);
+  margin: 0;
+}
+
+.questionBtn {
+  align-self: flex-start;
+  border-radius: var(--r-sm, 6px) !important;
+}
+
+/* Used state */
+.usedState {
+  padding: 14px 18px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+}
+
+/* Answer block - the reply letter */
+.answerBlock {
+  background: var(--surface);
+  border: 1px solid var(--border-warm);
+  border-radius: var(--r-lg, 14px);
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-card);
+}
+
+.echoQuestion {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+.answerText {
+  font-size: 0.9375rem;
+  color: var(--text-sub);
+  line-height: 1.8;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.answerNote {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+  font-style: italic;
+}
+
+/* Footer */
+.pageFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+/* Loading */
+.loadState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  min-height: 320px;
+}
+
+.loadOrb {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--text);
+  animation: orbPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes orbPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.15);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(0, 0, 0, 0);
+    transform: scale(1.06);
+  }
+}
+
+[data-theme="dark"] .loadOrb {
+  animation: orbPulseDark 1.4s ease-in-out infinite;
+}
+
+@keyframes orbPulseDark {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(255, 255, 255, 0);
+    transform: scale(1.06);
+  }
+}
+
+.loadLabel {
+  font-family: var(--serif, Georgia, serif);
+  font-size: 1rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Error */
+.errorState {
+  display: flex;
+  flex-direction: column;
+  padding: 48px 0;
+}
+
+/* Gate */
+.gateWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 64px 0 48px;
+  max-width: 520px;
+}
+
+.gateIcon {
+  margin-bottom: 16px;
+  opacity: 0.45;
+}
+
+.gateNote {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 10px);
+  padding: 20px;
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .moveCard {
+    padding: 18px 18px;
+    border-radius: 0 var(--r-md, 10px) var(--r-md, 10px) 0;
+  }
+  .answerBlock {
+    padding: 18px 18px;
+  }
+  .openingLine {
+    font-size: 1.125rem;
+  }
+  .pageFooter {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

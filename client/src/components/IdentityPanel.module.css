@@ -1,0 +1,101 @@
+.panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px;
+}
+
+.thinking {
+  margin-top: 4px;
+  color: var(--text);
+}
+
+.confidence {
+  text-align: right;
+  flex-shrink: 0;
+}
+.confScore {
+  font-family: var(--serif);
+  font-size: 1.75rem;
+  color: var(--text);
+  line-height: 1;
+  margin: 4px 0 6px;
+}
+.confScore span {
+  font-size: 1rem;
+  color: var(--text-muted);
+}
+
+.confBar {
+  width: 80px;
+  height: 4px;
+  background: var(--border);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  margin-left: auto;
+}
+.confFill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  transition: width 0.6s ease;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.cell {
+  background: var(--surface);
+  padding: 20px 24px;
+}
+
+/* More breathing room between tags */
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pressureBlock {
+  padding: 20px 24px;
+}
+
+.changeAlert {
+  padding: 16px 24px;
+  background: var(--success-dim);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@media (max-width: 600px) {
+  .header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .confidence {
+    text-align: left;
+  }
+  .confBar {
+    margin-left: 0;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
