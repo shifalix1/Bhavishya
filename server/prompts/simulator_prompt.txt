@@ -27,9 +27,22 @@ Must include at least one moment of genuine satisfaction — something the perso
 The sacrifice must feel specifically Indian middle-class: the cousin at a better company, the chachi at family dinners, the WhatsApp group update that stings.
 Must NOT read as the system having already decided against conventional paths.
 
-SALARY RULES:
-annual_salary_inr must come from the provided career data. Never invent it.
+SALARY RULES — READ CAREFULLY, VIOLATIONS WILL INVALIDATE THE OUTPUT:
+annual_salary_inr MUST be taken directly from the career data provided. If the career entry has a salary range, use the midpoint or a realistic figure from it.
+NEVER use the placeholder values 720000, 780000, or 900000 unless those numbers appear verbatim in the career data for that specific career. These are fallback defaults that make every demo look identical. If no salary is in the career data, estimate realistically based on Indian market rates for that role and city — but make it specific (e.g. 1150000, 680000, 1340000 — not round lakhs ending in 00000).
 Add a salary_context field: one sentence explaining what this salary means in context (take-home, rent in that city, ESOP upside if startup, pension security if government). Keep all rupee amounts out of the narrative — only in salary_context and annual_salary_inr.
+
+CITY SPECIFICITY RULES — MANDATORY:
+Every narrative must name a specific Indian city. The city must match the career type:
+- Software, SaaS, deep tech, AI → Bengaluru (Koramangala, Whitefield, HSR Layout)
+- Finance, banking, capital markets, consulting → Mumbai (BKC, Nariman Point, Andheri)
+- Government, policy, civil services, NGO policy → Delhi/New Delhi (Lodhi Road, Connaught Place, Saket)
+- Pharma, biotech, life sciences → Hyderabad or Pune
+- Film, OTT, advertising, media → Mumbai or Delhi
+- Sustainability, social impact, rural → name a Tier-2 city specific to the cause (Jaipur, Bhubaneswar, Coimbatore, Nagpur, etc.)
+- Marine, ocean, coastal sciences → Chennai or Kochi
+- Heritage, archaeology, conservation → Ahmedabad, Varanasi, or wherever the work actually happens
+- Do NOT default to a generic "metro city." Name the neighbourhood or area when it makes the narrative more real.
 
 ai_disruption_risk must be honest. Do not make it low to comfort the student.
 
@@ -62,12 +75,12 @@ Return ONLY valid JSON. The futures array must contain EXACTLY 3 objects: one "e
 "title": "string",
 "narrative": "string approximately 180-220 words, NO salary numbers inside",
 "career_trajectory": "string",
-"key_decision_point": "string",
+"key_decision_point": "string — use the parent_frame from career data, sound like real Indian parent pressure",
 "what_you_gain": "string",
-"what_you_sacrifice": "string",
+"what_you_sacrifice": "string — ground in honest_reality.what_they_dont_tell_you from career data",
 "ai_disruption_risk": "low | medium | high",
-"annual_salary_inr": 900000,
-"salary_context": "string: one sentence on what this salary means in practice"
+"annual_salary_inr": 0,
+"salary_context": "string: one sentence on what this salary means in practice, name the city"
 },
 {
 "type": "inner_call",
@@ -78,8 +91,8 @@ Return ONLY valid JSON. The futures array must contain EXACTLY 3 objects: one "e
 "what_you_gain": "string",
 "what_you_sacrifice": "string",
 "ai_disruption_risk": "low | medium | high",
-"annual_salary_inr": 780000,
-"salary_context": "string: one sentence on what this salary means in practice"
+"annual_salary_inr": 0,
+"salary_context": "string: one sentence on what this salary means in practice, name the city"
 },
 {
 "type": "unseen_door",
@@ -90,11 +103,13 @@ Return ONLY valid JSON. The futures array must contain EXACTLY 3 objects: one "e
 "what_you_gain": "string",
 "what_you_sacrifice": "string",
 "ai_disruption_risk": "low | medium | high",
-"annual_salary_inr": 720000,
-"salary_context": "string: one sentence on what this salary means in practice",
+"annual_salary_inr": 0,
+"salary_context": "string: one sentence on what this salary means in practice, name the city",
 "how_to_start": "string: 3 concrete steps this student can take starting this week"
 }
 ]
 }
+
+SALARY REMINDER BEFORE YOU OUTPUT: Check each annual_salary_inr value. If any of them is 720000, 780000, or 900000 and that number did not come from the career data provided, replace it with a realistic market-grounded figure for that role and city. These three numbers appearing in your output without career data backing is a hard failure.
 
 If you cannot generate valid JSON return exactly: {"error": "generation_failed"}

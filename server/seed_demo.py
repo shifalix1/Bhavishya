@@ -91,16 +91,49 @@ def seed_aryan():
         "change_summary": "Fear is more specific now: not 'wrong career' but 'ending up competent but bored'.",
     }
 
-    profile["session_count"] = 2
-    profile["identity_current"] = session2
+
+    # Session 3 — fear resolved, confidence peak, family conversation shifted
+    session3 = {
+        "thinking_style": "Learns by assembling things rather than reading instructions: needs to see how the parts connect before the purpose makes sense. Now explicitly aware of this pattern in himself.",
+        "core_values": ["independence", "making", "creative_control"],
+        "hidden_strengths": [
+            "Unusually good at noticing when a system has a flaw before it breaks.",
+            "Works much harder on self-chosen problems than on assigned ones.",
+            "Can hold a complex physical system in his head and reason about failure modes before touching it.",
+        ],
+        "active_fears": [
+            "Ending up competent but bored.",
+        ],
+        "family_pressure_map": "Father expects JEE. The conversation has shifted — Aryan has started framing ECE as 'engineering with hardware focus' rather than 'not JEE'. Father is now listening.",
+        "energy_signature": "Comes alive when given a broken thing to fix or an open-ended build challenge with no single right answer.",
+        "identity_confidence": 9,
+        "changed_since_last": True,
+        "change_summary": "Fear of 'choosing the wrong career' is resolved. Remaining fear is more specific: competence without meaning. Family conversation has moved from resistance to negotiation.",
+    }
+
+    profile["session_count"] = 3
+    profile["identity_current"] = session3
     profile["identity_history"] = [
         {"session": 1, "snapshot": session1},
         {"session": 2, "snapshot": session2},
+        {"session": 3, "snapshot": session3},
     ]
     profile["last_session"] = str(date.today())
 
+    # InsightBanner reads these two fields — populated at login time
+    profile["identity_delta"] = {
+        "previous_confidence": 8,
+        "current_confidence": 9,
+        "resolved_fears": ["Choosing engineering because everyone expects it, not because he wants it."],
+        "new_strengths": ["Can hold a complex physical system in his head and reason about failure modes before touching it."],
+    }
+    profile["last_session_summary"] = {
+        "has_new_move": True,
+        "session_index": 3,
+        "one_line": "Fear of wrong career resolved. Margdarshak has a new move for you.",
+    }
+
     profile["aawaz_history"] = [
-        {"role": "user", "content": "papa bol rahe hain JEE ki coaching join karo"},
         {
             "role": "aawaz",
             "content": "Family hamesha safe option chahti hai, I get it. Par sach bata - jab koi nahi dekh raha hota, toh tu kya karta hai?",
@@ -261,13 +294,47 @@ def seed_priya():
         "change_summary": "Fear is now more specific: not 'wrong career' but 'choosing for the wrong reason and being unable to admit it later'.",
     }
 
-    profile["session_count"] = 2
-    profile["identity_current"] = session2
+    # Session 3 — second fear resolved, active decision made, confidence peak
+    session3 = {
+        "thinking_style": "Processes information by connecting patterns across different domains - notices the structure underneath things, not just the surface. Now applies this deliberately rather than accidentally.",
+        "core_values": ["understanding", "systemic_impact", "deliberate_choice"],
+        "hidden_strengths": [
+            "Asks the question underneath the question - gets to root causes others skip.",
+            "Comfortable with ambiguity in a way that is rare for her age.",
+            "Can hold uncertainty long enough to make a real decision rather than a reactive one.",
+        ],
+        "active_fears": [],
+        "family_pressure_map": "Family pressure remains but Priya has reframed the conversation from 'NEET vs not-NEET' to 'which kind of doctor-adjacent career.' IISER is now on the table at home.",
+        "energy_signature": "Comes alive when she finds the pattern that explains why something works - the mechanism, not just the symptom.",
+        "identity_confidence": 9,
+        "changed_since_last": True,
+        "change_summary": "Both active fears resolved. No longer afraid of choosing wrong — is now focused on choosing deliberately. Family conversation has shifted from resistance to negotiation.",
+    }
+
+    profile["session_count"] = 3
+    profile["identity_current"] = session3
     profile["identity_history"] = [
         {"session": 1, "snapshot": session1},
         {"session": 2, "snapshot": session2},
+        {"session": 3, "snapshot": session3},
     ]
     profile["last_session"] = str(date.today())
+
+    # InsightBanner reads these two fields — populated at login time
+    profile["identity_delta"] = {
+        "previous_confidence": 8,
+        "current_confidence": 9,
+        "resolved_fears": [
+            "Finding out at 25 that she chose the wrong thing and being unable to admit it.",
+            "Choosing medicine because it is the path of least resistance.",
+        ],
+        "new_strengths": ["Can hold uncertainty long enough to make a real decision rather than a reactive one."],
+    }
+    profile["last_session_summary"] = {
+        "has_new_move": True,
+        "session_index": 3,
+        "one_line": "Both fears resolved. Margdarshak has a move specifically for the family conversation.",
+    }
 
     profile["aawaz_history"] = [
         {
@@ -384,8 +451,12 @@ if __name__ == "__main__":
     print("  demo_aryan  PIN: 1234  Class 11 - engineering vs hardware builder")
     print("  demo_priya  PIN: 1234  Class 10 - doctor pressure vs systems thinker")
     print("\nOn first login both accounts immediately show:")
-    print("  - Longitudinal memory callback (2 sessions of history)")
-    print("  - Identity delta (change between sessions)")
+    print("  - InsightBanner with confidence delta (e.g. 8 → 9)")
+    print("  - Resolved fears listed in the banner")
+    print("  - Margdarshak new-move flag set")
+    print("  - 3 sessions of longitudinal memory visible in history")
     print("  - Pre-generated futures (no simulator wait time)")
     print("  - Seeded micro-observations (behavioral pattern detection visible)")
     print("\nStart the demo with demo_aryan.")
+    print("Aryan arc: hardware fixer → embedded systems clarity → fear resolved")
+    print("Priya arc: NEET pressure → mechanism curiosity → deliberate choice made")

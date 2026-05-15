@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger("bhavishya.careers")
 
@@ -275,6 +276,51 @@ _SEMANTIC_BUCKETS: dict[str, list[str]] = {
     "persistent": ["persistence", "resilience", "achievement-driven"],
     "patient": ["patience", "long-term thinking", "deep focus", "methodical"],
     "autonomy": ["autonomous", "self-directed", "independent thinking"],
+    # Additional natural-language phrases that _SEMANTIC_BUCKETS previously missed
+    "understand": ["systems thinking", "analytical thinking", "curiosity"],
+    "understanding": ["systems thinking", "analytical thinking", "curiosity"],
+    "work": ["hands-on problem solving", "practical application", "results-oriented"],
+    "works": ["making things work", "results-oriented", "practical application"],
+    "figure": ["problem-solving", "analytical thinking", "curiosity"],
+    "connect": ["systems thinking", "pattern recognition", "communicative"],
+    "connects": ["systems thinking", "pattern recognition", "communicative"],
+    "question": ["curiosity", "truth-seeking", "research", "analytical thinking"],
+    "questions": ["curiosity", "truth-seeking", "research", "analytical thinking"],
+    "imagine": ["creative thinking", "creative problem-solving", "innovation"],
+    "imagine ": ["creative thinking", "creative problem-solving", "innovation"],
+    "feel": ["empathy", "empathetic", "social awareness"],
+    "feelings": ["empathy", "empathetic", "social awareness"],
+    "move": ["physical discipline", "hands-on problem solving", "spatial reasoning"],
+    "fix": ["troubleshooting", "problem-solving", "technical craftsmanship"],
+    "broken": ["troubleshooting", "problem-solving", "technical craftsmanship"],
+    "organize": ["systematic", "organized", "methodical", "process-oriented"],
+    "organize ": ["systematic", "organized", "methodical"],
+    "plan": ["strategic thinking", "systematic", "organized", "long-term thinking"],
+    "explore": ["curiosity", "fieldwork", "research", "continuous learning"],
+    "connect people": ["communicative", "leadership", "social awareness", "empathy"],
+    "make sense": ["simplifying complexity", "teaching", "analytical thinking"],
+    "big picture": ["systems thinking", "strategic thinking", "analytical"],
+    "details": ["attention to detail", "detail-oriented", "precision"],
+    "ideas": ["creative thinking", "innovation", "entrepreneurial mindset"],
+    "change": ["social impact", "purpose-driven", "innovation", "advocacy"],
+    "fair": ["equity", "access to justice", "social impact", "advocacy"],
+    "story": ["storytelling", "narrative building", "communication"],
+    "stories": ["storytelling", "narrative building", "communication"],
+    "protect": [
+        "conservation",
+        "environmental awareness",
+        "advocacy",
+        "service orientation",
+    ],
+    "build": ["building real things", "technical craftsmanship", "engineering mindset"],
+    "create": ["creative", "building something new", "artistic expression"],
+    "solve": ["problem-solving", "troubleshooting", "analytical", "solutions-oriented"],
+    "measure": ["precision", "quantitative analysis", "evidence-based", "accuracy"],
+    "test": ["scientific inquiry", "research methodology", "evidence-based"],
+    "lead": ["leadership", "influence", "team leadership", "strategic leadership"],
+    "help": ["empathy", "human-centered", "service orientation", "empathetic"],
+    "teach": ["teaching", "knowledge sharing", "communication", "mentoring"],
+    "discover": ["curiosity", "research", "scientific inquiry", "continuous learning"],
 }
 
 
@@ -334,6 +380,43 @@ def _expand_to_tags(text: str) -> list[str]:
     return result
 
 
+def _tokenize(text: str) -> set[str]:
+    """Return a set of lowercase word tokens from free text."""
+    return set(re.findall(r"[a-z]{3,}", text.lower()))
+
+
+def _score_career_text_pass(career: dict, identity_tokens: set[str]) -> int:
+    """
+    Second scoring pass: substring match against description_short,
+    indian_reality, and honest_reality free-text fields.
+    Returns a bonus score (max ~10) so it complements but doesn't
+    override strong identity_tag matches.
+    """
+    corpus_parts = []
+    if career.get("description_short"):
+        corpus_parts.append(career["description_short"])
+    if career.get("indian_reality"):
+        ir = career["indian_reality"]
+        if isinstance(ir, str):
+            corpus_parts.append(ir)
+        elif isinstance(ir, dict):
+            corpus_parts.extend(str(v) for v in ir.values())
+    if career.get("honest_reality"):
+        hr = career["honest_reality"]
+        if isinstance(hr, str):
+            corpus_parts.append(hr)
+        elif isinstance(hr, dict):
+            corpus_parts.extend(str(v) for v in hr.values())
+
+    if not corpus_parts:
+        return 0
+
+    corpus_tokens = _tokenize(" ".join(corpus_parts))
+    overlap = identity_tokens & corpus_tokens
+    # Cap at 10 to keep it a bonus, not a takeover
+    return min(len(overlap), 10)
+
+
 def _score_career(career: dict, expanded_set: set) -> int:
     career_tags = career.get("identity_tags", {})
     career_kw = set(
@@ -363,14 +446,25 @@ def get_careers_for_identity(identity: dict, n: int = 5) -> list:
         return []
 
     expanded_tags: list[str] = []
+    raw_identity_text_parts: list[str] = []
+
     if identity.get("thinking_style"):
         expanded_tags.extend(_expand_to_tags(identity["thinking_style"]))
+        raw_identity_text_parts.append(identity["thinking_style"])
     if identity.get("energy_signature"):
         expanded_tags.extend(_expand_to_tags(identity["energy_signature"]))
+        raw_identity_text_parts.append(identity["energy_signature"])
     for strength in identity.get("hidden_strengths", []):
         expanded_tags.extend(_expand_to_tags(strength))
+        raw_identity_text_parts.append(strength)
     for value in identity.get("core_values", []):
         expanded_tags.extend(_expand_to_tags(value))
+        raw_identity_text_parts.append(value)
+    # Also pull from fears and identity summary if present
+    if identity.get("core_fear"):
+        raw_identity_text_parts.append(identity["core_fear"])
+    if identity.get("summary"):
+        raw_identity_text_parts.append(identity["summary"])
 
     if not expanded_tags:
         logger.debug(
@@ -379,10 +473,23 @@ def get_careers_for_identity(identity: dict, n: int = 5) -> list:
         return _slim_careers(careers[:n])
 
     expanded_set = set(expanded_tags)
-    scored = [(_score_career(c, expanded_set), c) for c in careers]
+
+    # Build token set from raw identity text for second pass
+    identity_tokens = _tokenize(" ".join(raw_identity_text_parts))
+
+    scored = []
+    for c in careers:
+        primary_score = _score_career(c, expanded_set)
+        # Second pass: only run if primary score is low (avoids inflating
+        # already strong matches while rescuing zero-score careers)
+        if primary_score < 6:
+            text_bonus = _score_career_text_pass(c, identity_tokens)
+        else:
+            text_bonus = 0
+        scored.append((primary_score + text_bonus, c))
+
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # FIX #7: log when top career gets a low score (tag expansion probably missed)
     if scored and scored[0][0] == 0:
         logger.debug(
             f"Expanded tags: {expanded_set} | top career: {scored[0][1].get('name')} | score: 0 - "
@@ -407,5 +514,6 @@ def _slim_careers(careers: list) -> list:
         "ai_disruption",
         "honest_reality",
         "parent_frame",
+        "identity_tags",  # kept so simulator can do its own reasoning
     }
     return [{k: v for k, v in c.items() if k in keep} for c in careers]

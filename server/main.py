@@ -59,6 +59,9 @@ from core.memory import (
     trim_conversation_history,
     needs_compression,
     compress_history,
+    # FIX: new functions added in memory.py Round 2
+    save_session_snapshot,
+    get_sessions_structured,
 )
 from core.language import detect_language
 from core.careers import get_careers_for_identity
@@ -67,9 +70,6 @@ from core.careers import get_careers_for_identity
 limiter = Limiter(key_func=get_remote_address)
 
 # Rolling summarizer
-# Injected into compress_history() so memory.py stays model-agnostic.
-# Uses the cloud client from margdarshak (already initialised at startup).
-
 _SUMMARY_MODEL = "gemma-4-26b-a4b-it"
 _SUMMARY_SYSTEM = (
     "You are a memory compression assistant. "
@@ -84,16 +84,10 @@ _SUMMARY_SYSTEM = (
 
 
 async def _summarize_history_block(text: str) -> str:
-    """
-    Async summarizer injected into compress_history().
-    Uses a lightweight generation call — minimal tokens, 10s timeout.
-    Falls back to a simple truncated excerpt if the model call fails.
-    """
     from google import genai as _genai
 
     api_key = os.getenv("GOOGLE_API_KEY", "")
     if not api_key:
-        # No API key: return a naive first-200-word excerpt instead of crashing.
         words = text.split()
         return "Earlier in the conversation: " + " ".join(words[:200])
 
@@ -118,10 +112,6 @@ async def _summarize_history_block(text: str) -> str:
 
 
 async def _maybe_compress(profile: dict) -> dict:
-    """
-    Check if rolling compression is needed and run it if so.
-    Called in chat and session endpoints before save_student().
-    """
     if needs_compression(profile):
         logger.info(
             f"[MEMORY] Compressing history for {profile.get('username', '?')} "
@@ -131,16 +121,11 @@ async def _maybe_compress(profile: dict) -> dict:
     return profile
 
 
-# Lifespan: startup pre-warm
+# Lifespan
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Pre-warm all four Gemini client singletons at startup.
-    This runs the TLS handshake and object init once, before any request arrives,
-    eliminating the per-module lazy-init race under concurrent load.
-    """
     logger.info("[STARTUP] Pre-warming Gemini clients...")
     mode = os.getenv("BHAVISHYA_MODE", "cloud").lower()
     if mode == "cloud":
@@ -152,7 +137,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("[STARTUP] Ollama mode - skipping Gemini client pre-warm.")
     yield
-    # Shutdown: nothing to clean up for stateless HTTP clients.
     logger.info("[SHUTDOWN] Bhavishya API shutting down.")
 
 
@@ -178,14 +162,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# X-API-Key auth middleware
 _API_KEY = os.getenv("BHAVISHYA_API_KEY", "")
 UNPROTECTED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    if request.method == "OPTIONS":  # ← let CORS preflight through
+    if request.method == "OPTIONS":
         return await call_next(request)
     if request.url.path in UNPROTECTED_PATHS:
         return await call_next(request)
@@ -201,7 +184,7 @@ async def api_key_middleware(request: Request, call_next):
 
 # Helpers
 USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
-_CONV_HISTORY_LIMIT = 50  # emergency safety cap; compression fires at 40
+_CONV_HISTORY_LIMIT = 50
 
 
 def validate_username(username: str) -> None:
@@ -312,7 +295,7 @@ async def health():
     }
 
 
-# Auth routes
+# ── Auth routes ───────────────────────────────────────────────────────────────
 
 
 @auth_router.post("/register")
@@ -373,6 +356,43 @@ async def login(req: LoginRequest, request: Request):
 
     logger.info(f"Login: {req.username} | session #{profile.get('session_count', 0)}")
 
+    # FIX: compute identity_delta and last_session_summary for Dashboard InsightBanner
+    identity_current = profile.get("identity_current", {})
+    sessions = profile.get("sessions", [])
+    identity_delta = {}
+    last_session_summary = None
+
+    if len(sessions) >= 2:
+        # Sort by session number to guarantee correct prev/current pairing
+        sorted_sessions = sorted(sessions, key=lambda s: s.get("session", 0))
+        prev_snap_identity = sorted_sessions[-2].get("identity") or {}
+        identity_delta = get_identity_delta(prev_snap_identity, identity_current)
+
+        prev_conf = prev_snap_identity.get("identity_confidence", 0)
+        curr_conf = identity_current.get("identity_confidence", 0)
+        prev_fears = set(f.lower() for f in prev_snap_identity.get("active_fears", []))
+        curr_fears = set(f.lower() for f in identity_current.get("active_fears", []))
+        resolved_fears = list(prev_fears - curr_fears)
+
+        last_session_summary = {
+            "prev_confidence": prev_conf,
+            "curr_confidence": curr_conf,
+            "confidence_direction": (
+                "up"
+                if curr_conf > prev_conf
+                else "down" if curr_conf < prev_conf else "same"
+            ),
+            "resolved_fears": resolved_fears,
+            "session_count": profile.get("session_count", 0),
+            "date": sorted_sessions[-1].get("date", ""),
+        }
+    elif len(sessions) == 1:
+        last_session_summary = {
+            "session_count": 1,
+            "date": sessions[0].get("date", ""),
+            "curr_confidence": identity_current.get("identity_confidence", 0),
+        }
+
     return {
         "username": profile["username"],
         "name": profile["name"],
@@ -382,6 +402,9 @@ async def login(req: LoginRequest, request: Request):
         "session_count": profile.get("session_count", 0),
         "has_identity": bool(profile.get("identity_current")),
         "has_futures": bool(profile.get("futures_generated")),
+        # FIX: new fields for Dashboard InsightBanner
+        "identity_delta": identity_delta,
+        "last_session_summary": last_session_summary,
     }
 
 
@@ -419,7 +442,7 @@ async def onboard(req: OnboardRequest, request: Request):
     }
 
 
-# Aawaz routes
+# ── Aawaz routes ──────────────────────────────────────────────────────────────
 
 
 @aawaz_router.post("/transcribe")
@@ -485,8 +508,12 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
             detail="AI is temporarily unavailable. Please try again in a moment.",
         )
 
-    history.append({"role": "user", "content": req.message})
-    history.append({"role": "aawaz", "content": response})
+    # FIX: stamp session_index on aawaz messages at write time
+    session_idx = profile.get("session_count", 0)
+    history.append(
+        {"role": "user", "content": req.message, "session_index": session_idx}
+    )
+    history.append({"role": "aawaz", "content": response, "session_index": session_idx})
     profile["aawaz_history"] = history
 
     observations = extract_micro_observations(history)
@@ -513,7 +540,7 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
     }
 
 
-# Core routes
+# ── Core routes ───────────────────────────────────────────────────────────────
 
 
 @core_router.post("/session")
@@ -569,6 +596,10 @@ async def run_session(req: SessionRequest, request: Request):
     profile = await _maybe_compress(profile)
     profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
 
+    # FIX: persist structured session snapshot so /history/{uid} and Sidebar drawer
+    # can read real data instead of flat list divided by session count.
+    profile = save_session_snapshot(profile)
+
     save_student(profile)
 
     return {
@@ -618,6 +649,9 @@ async def simulate(req: SimulateRequest, request: Request):
             "futures": futures.get("futures", []),
         }
     )
+
+    # FIX: update snapshot with futures now that they're generated
+    profile = save_session_snapshot(profile)
     save_student(profile)
 
     is_fallback = futures.get("_fallback", False)
@@ -627,11 +661,6 @@ async def simulate(req: SimulateRequest, request: Request):
 @core_router.post("/margdarshak/guidance")
 @limiter.limit("10/minute")
 async def margdarshak_guidance(req: MargdarshakGuidanceRequest, request: Request):
-    """
-    Generate Margdarshak structured guidance from identity fingerprint.
-    Returns: current_read, next_move (action/why/type), watch_for, opening_line.
-    Requires identity_current (Darpan must have run first).
-    """
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
@@ -682,10 +711,6 @@ async def margdarshak_guidance(req: MargdarshakGuidanceRequest, request: Request
 @core_router.post("/margdarshak/question")
 @limiter.limit("5/minute")
 async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request):
-    """
-    Student's one question per guidance cycle to Margdarshak.
-    Scarcity is intentional.
-    """
     profile = load_student(req.name, req.grade, req.uid)
     if not profile or not profile.get("identity_current"):
         raise HTTPException(
@@ -723,6 +748,9 @@ async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request
             "session": profile.get("session_count", 1),
         }
     )
+
+    # FIX: update snapshot so Margdarshak Q&A appears in Sidebar session drawer
+    profile = save_session_snapshot(profile)
     save_student(profile)
 
     return {
@@ -736,64 +764,15 @@ async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request
 @limiter.limit("20/minute")
 async def get_history(uid: str, request: Request):
     """
-    Returns per-session history for the sidebar:
-    aawaz_history, identity_history, margdarshak_history, futures_generated
-    grouped by session number.
+    FIX: replaces the broken flat-list division approach.
+    Now calls get_sessions_structured() which uses session_index stamps
+    written at message time — correct regardless of session length variance.
     """
     profile = load_by_username(uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Student not found.")
 
-    total_sessions = profile.get("session_count", 0)
-    identity_history = profile.get("identity_history", [])
-    futures_generated = profile.get("futures_generated", [])
-    margdarshak_history = profile.get("margdarshak_history", [])
-    aawaz_history = profile.get("aawaz_history", [])
-
-    sessions = []
-    for i in range(1, total_sessions + 1):
-        identity_snap = next(
-            (h["snapshot"] for h in identity_history if h.get("session") == i), None
-        )
-        futures_snap = next(
-            (f["futures"] for f in futures_generated if f.get("session") == i), None
-        )
-        marg_entries = [m for m in margdarshak_history if m.get("session") == i]
-
-        sessions.append(
-            {
-                "session": i,
-                "identity": identity_snap,
-                "futures": futures_snap,
-                "margdarshak": marg_entries,
-            }
-        )
-
-    # Attach aawaz turns to the session they belong to.
-    # aawaz_history is a flat list; we split by estimating turns per session
-    # using session_count and equal distribution, then expose raw list for frontend.
-    # Also tag session 1 with the first N aawaz turns for display.
-    turns_per_session = (
-        (len(aawaz_history) // total_sessions)
-        if total_sessions > 0
-        else len(aawaz_history)
-    )
-    for idx, sess in enumerate(sessions):
-        start = idx * turns_per_session
-        end = (
-            start + turns_per_session
-            if idx < total_sessions - 1
-            else len(aawaz_history)
-        )
-        sess["aawaz_turns"] = aawaz_history[start:end]
-
-    return {
-        "username": profile.get("username"),
-        "name": profile.get("name"),
-        "total_sessions": total_sessions,
-        "aawaz_history": aawaz_history,
-        "sessions": sessions,
-    }
+    return get_sessions_structured(profile)
 
 
 # Router registration
