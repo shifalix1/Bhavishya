@@ -4,7 +4,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -675,7 +675,7 @@ async def margdarshak_guidance(req: MargdarshakGuidanceRequest, request: Request
         "is_fallback": is_fallback,
         "identity_confidence": identity.get("identity_confidence", 5),
         "session_count": profile.get("session_count", 1),
-        "question_used": False,
+        "question_used": profile.get("margdarshak_question_used", False),
     }
 
 
@@ -729,6 +729,52 @@ async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request
         "answer": answer,
         "is_fallback": is_fallback,
         "question_used": True,
+    }
+
+
+@core_router.get("/history/{uid}")
+@limiter.limit("20/minute")
+async def get_history(uid: str, request: Request):
+    """
+    Returns per-session history for the sidebar:
+    aawaz_history, identity_history, margdarshak_history, futures_generated
+    grouped by session number.
+    """
+    profile = load_by_username(uid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student not found.")
+
+    total_sessions = profile.get("session_count", 0)
+    identity_history = profile.get("identity_history", [])
+    futures_generated = profile.get("futures_generated", [])
+    margdarshak_history = profile.get("margdarshak_history", [])
+    aawaz_history = profile.get("aawaz_history", [])
+
+    sessions = []
+    for i in range(1, total_sessions + 1):
+        identity_snap = next(
+            (h["snapshot"] for h in identity_history if h.get("session") == i), None
+        )
+        futures_snap = next(
+            (f["futures"] for f in futures_generated if f.get("session") == i), None
+        )
+        marg_entries = [m for m in margdarshak_history if m.get("session") == i]
+
+        sessions.append(
+            {
+                "session": i,
+                "identity": identity_snap,
+                "futures": futures_snap,
+                "margdarshak": marg_entries,
+            }
+        )
+
+    return {
+        "username": profile.get("username"),
+        "name": profile.get("name"),
+        "total_sessions": total_sessions,
+        "aawaz_history": aawaz_history,  # all aawaz turns (not per-session, shared)
+        "sessions": sessions,
     }
 
 
