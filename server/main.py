@@ -769,11 +769,29 @@ async def get_history(uid: str, request: Request):
             }
         )
 
+    # Attach aawaz turns to the session they belong to.
+    # aawaz_history is a flat list; we split by estimating turns per session
+    # using session_count and equal distribution, then expose raw list for frontend.
+    # Also tag session 1 with the first N aawaz turns for display.
+    turns_per_session = (
+        (len(aawaz_history) // total_sessions)
+        if total_sessions > 0
+        else len(aawaz_history)
+    )
+    for idx, sess in enumerate(sessions):
+        start = idx * turns_per_session
+        end = (
+            start + turns_per_session
+            if idx < total_sessions - 1
+            else len(aawaz_history)
+        )
+        sess["aawaz_turns"] = aawaz_history[start:end]
+
     return {
         "username": profile.get("username"),
         "name": profile.get("name"),
         "total_sessions": total_sessions,
-        "aawaz_history": aawaz_history,  # all aawaz turns (not per-session, shared)
+        "aawaz_history": aawaz_history,
         "sessions": sessions,
     }
 

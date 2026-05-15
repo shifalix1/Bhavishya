@@ -269,3 +269,20 @@
 2026-05-14 22:47:38,058 [INFO] bhavishya.margdarshak - [MARGDARSHAK] Gemini client initialised.
 2026-05-14 22:47:39,630 [INFO] bhavishya.simulator - [SIMULATOR] Gemini client initialised.
 2026-05-14 22:47:39,631 [INFO] bhavishya - [STARTUP] All Gemini clients ready.
+2026-05-15 10:06:17,687 [INFO] bhavishya - [STARTUP] Pre-warming Gemini clients...
+2026-05-15 10:06:19,490 [INFO] bhavishya.aawaz - [AAWAZ] Gemini client initialised.
+2026-05-15 10:06:21,055 [INFO] bhavishya.darpan - [DARPAN] Gemini client initialised.
+2026-05-15 10:06:22,694 [INFO] bhavishya.margdarshak - [MARGDARSHAK] Gemini client initialised.
+2026-05-15 10:06:24,367 [INFO] bhavishya.simulator - [SIMULATOR] Gemini client initialised.
+2026-05-15 10:06:24,369 [INFO] bhavishya - [STARTUP] All Gemini clients ready.
+2026-05-15 10:12:55,973 [INFO] bhavishya - [AAWAZ/CHAT] Shifali | exchange #22 | lang=english
+2026-05-15 10:12:55,991 [INFO] google_genai.models - AFC is enabled with max remote calls: 10.
+2026-05-15 10:12:58,823 [INFO] httpx - HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent "HTTP/1.1 200 OK"
+2026-05-15 11:24:47,700 [INFO] bhavishya - [SHUTDOWN] Bhavishya API shutting down.
+2026-05-15 11:24:55,865 [INFO] bhavishya - [STARTUP] Pre-warming Gemini clients...
+2026-05-15 11:24:57,115 [INFO] bhavishya.aawaz - [AAWAZ] Gemini client initialised.
+2026-05-15 11:24:58,130 [INFO] bhavishya.darpan - [DARPAN] Gemini client initialised.
+2026-05-15 11:24:59,060 [INFO] bhavishya.margdarshak - [MARGDARSHAK] Gemini client initialised.
+2026-05-15 11:25:00,019 [INFO] bhavishya.simulator - [SIMULATOR] Gemini client initialised.
+2026-05-15 11:25:00,020 [INFO] bhavishya - [STARTUP] All Gemini clients ready.
+2026-05-15 13:09:17,836 [INFO] bhavishya - [SHUTDOWN] Bhavishya API shutting down.
