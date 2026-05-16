@@ -99,7 +99,8 @@ export default function Onboard({ onDone }) {
           </h1>
           <p className={styles.subhead}>
             Bhavishya listens to who you are, tracks how you grow, and shows you
-            three honest futures set in 2031. Free. Bilingual. Always there.
+            three honest futures ~ specific to you, grounded in real data. Free.
+            Bilingual. Always there.
           </p>
           <div className={styles.crossDevice}>
             <DevicesIcon />

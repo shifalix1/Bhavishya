@@ -86,6 +86,13 @@
   color: var(--text);
 }
 
+.blockSubtitle {
+  font-size: 0.75rem;
+  color: var(--gold);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 .blockBody {
   font-size: 0.875rem;
   color: var(--text-sub);

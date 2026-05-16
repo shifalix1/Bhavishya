@@ -351,9 +351,13 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [openSession, setOpenSession] = useState(null);
 
-  // FIX: ref guards against duplicate in-flight fetches without adding
-  // historyLoading to useCallback deps (which caused stale closure on rapid clicks)
+  // fetchingRef: guards against duplicate in-flight fetches.
+  // historyRef: mirrors the history state value so useCallback closures can
+  //   read it without needing history in their dep arrays (which caused every
+  //   history update to create a new loadHistory/handleSessionClick reference,
+  //   risking duplicate fetches on rapid clicks despite the fetchingRef guard).
   const fetchingRef = useRef(false);
+  const historyRef = useRef(null);
 
   const handleLogout = () => {
     try {
@@ -367,12 +371,14 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   };
 
   const loadHistory = useCallback(async () => {
-    if (history) return history;
+    // Read from ref — stable across renders, no stale-closure risk
+    if (historyRef.current) return historyRef.current;
     if (fetchingRef.current) return null;
     fetchingRef.current = true;
     setHistoryLoading(true);
     try {
       const res = await api.getHistory(student.uid);
+      historyRef.current = res;
       setHistory(res);
       return res;
     } catch (e) {
@@ -382,7 +388,7 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
       setHistoryLoading(false);
       fetchingRef.current = false;
     }
-  }, [student.uid, history]);
+  }, [student.uid]); // history removed — read via historyRef instead
 
   // FIX: open drawer immediately so SessionDrawer mounts with its loading
   // skeleton. Old code awaited loadHistory() before setOpenSession, so
@@ -395,12 +401,12 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
       }
       // Mount drawer right away — it will show loading skeleton if data isn't ready
       setOpenSession(sessionNum);
-      if (!history && !fetchingRef.current) {
+      if (!historyRef.current && !fetchingRef.current) {
         await loadHistory();
         // State update from loadHistory triggers re-render with real data
       }
     },
-    [openSession, history, loadHistory],
+    [openSession, loadHistory], // history removed — read via historyRef instead
   );
 
   const openSessionData = history?.sessions?.find(

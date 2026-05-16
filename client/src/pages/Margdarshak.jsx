@@ -131,6 +131,7 @@ export default function Margdarshak({
         student.uid,
         student.name,
         student.grade,
+        student.language_preference || "english",
       );
       setGuidance(res.guidance);
       setQuestionUsed(res.question_used ?? false);
@@ -141,7 +142,7 @@ export default function Margdarshak({
     } finally {
       setLoading(false);
     }
-  }, [student.uid, student.name, student.grade]);
+  }, [student.uid, student.name, student.grade, student.language_preference]);
 
   useEffect(() => {
     if (student.has_identity && !hasFetched.current) {
@@ -174,6 +175,7 @@ export default function Margdarshak({
         student.grade,
         q,
         guidance,
+        student.language_preference || "english",
       );
       setAnswer(res.answer);
       setQuestionUsed(true);

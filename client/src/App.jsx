@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Onboard from "./pages/Onboard";
 import Dashboard from "./pages/Dashboard";
+import ErrorBoundary from "./ErrorBoundary";
 
 const CACHE_KEY = "bhavishya_auth";
 
@@ -19,8 +20,12 @@ export default function App() {
   const [student, setStudent] = useState(() => getCache());
 
   return student ? (
-    <Dashboard student={student} onLogout={() => setStudent(null)} />
+    <ErrorBoundary>
+      <Dashboard student={student} onLogout={() => setStudent(null)} />
+    </ErrorBoundary>
   ) : (
-    <Onboard onDone={setStudent} />
+    <ErrorBoundary>
+      <Onboard onDone={setStudent} />
+    </ErrorBoundary>
   );
 }

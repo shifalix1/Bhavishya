@@ -31,7 +31,7 @@ export default function WhatIsDarpan({ onBack }) {
         <Block
           num="03"
           title="Bhavishya Core shows three honest futures"
-          subtitle="Set in 2031"
+          subtitle="Your life, years from now."
           body="After your first session, the system simulates three parallel life paths grounded in real Indian career data, specific to who you actually are — not who your school says you should be."
         />
         <Block
@@ -45,6 +45,12 @@ export default function WhatIsDarpan({ onBack }) {
           title="It remembers you across sessions"
           subtitle="Longitudinal tracking"
           body="Every session updates your fingerprint. Over time, Bhavishya tracks how you change, shows you what shifted, what stayed the same, and why that matters for your decisions."
+        />
+        <Block
+          num="06"
+          title="Built on Gemma, Google's open model"
+          subtitle="Why Gemma specifically"
+          body="Gemma's multilingual tokenization handles Hinglish natively no separate translation step. Critical for students who think and speak in a mix of Hindi and English, which is most of India."
         />
       </div>
 
