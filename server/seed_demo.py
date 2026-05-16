@@ -91,7 +91,6 @@ def seed_aryan():
         "change_summary": "Fear is more specific now: not 'wrong career' but 'ending up competent but bored'.",
     }
 
-
     # Session 3 — fear resolved, confidence peak, family conversation shifted
     session3 = {
         "thinking_style": "Learns by assembling things rather than reading instructions: needs to see how the parts connect before the purpose makes sense. Now explicitly aware of this pattern in himself.",
@@ -111,29 +110,8 @@ def seed_aryan():
         "change_summary": "Fear of 'choosing the wrong career' is resolved. Remaining fear is more specific: competence without meaning. Family conversation has moved from resistance to negotiation.",
     }
 
-    profile["session_count"] = 3
-    profile["identity_current"] = session3
-    profile["identity_history"] = [
-        {"session": 1, "snapshot": session1},
-        {"session": 2, "snapshot": session2},
-        {"session": 3, "snapshot": session3},
-    ]
-    profile["last_session"] = str(date.today())
-
-    # InsightBanner reads these two fields — populated at login time
-    profile["identity_delta"] = {
-        "previous_confidence": 8,
-        "current_confidence": 9,
-        "resolved_fears": ["Choosing engineering because everyone expects it, not because he wants it."],
-        "new_strengths": ["Can hold a complex physical system in his head and reason about failure modes before touching it."],
-    }
-    profile["last_session_summary"] = {
-        "has_new_move": True,
-        "session_index": 3,
-        "one_line": "Fear of wrong career resolved. Margdarshak has a new move for you.",
-    }
-
-    profile["aawaz_history"] = [
+    # Aawaz turns split per session — Sidebar drawer reads snap.aawaz_turns
+    _aryan_s1_turns = [
         {
             "role": "aawaz",
             "content": "Family hamesha safe option chahti hai, I get it. Par sach bata - jab koi nahi dekh raha hota, toh tu kya karta hai?",
@@ -150,6 +128,8 @@ def seed_aryan():
             "role": "user",
             "content": "dust tha woofer mein, obvious tha par nobody checked. mujhe ye cheezein dikhti hain jaldi",
         },
+    ]
+    _aryan_s2_turns = [
         {
             "role": "aawaz",
             "content": "Aur engineering mein kya lagta hai tujhe? Woh feeling jo speaker fix karte waqt aayi, woh wahan bhi aayegi?",
@@ -163,6 +143,119 @@ def seed_aryan():
             "content": "Hardware interesting hai - that's already more specific than most people your age know about themselves. Kab se hai yeh?",
         },
     ]
+    _aryan_s3_turns = [
+        {
+            "role": "user",
+            "content": "main hardware mein jaana chahta hoon but papa bol rahe hain software hi karo, zyada scope hai",
+        },
+        {
+            "role": "aawaz",
+            "content": "Jo cheez tune speaker mein dekhi - woh diagnostic instinct hai. Embedded systems engineers exactly yahi karte hain: hardware aur software ka intersection.",
+        },
+        {"role": "user", "content": "embedded systems kya hota hai exactly"},
+        {
+            "role": "aawaz",
+            "content": "Woh speaker jo tune fix kiya? Ek embedded system tha. Car brake sensors, medical devices, satellite components - sab embedded. Ek kaam kar: 'Embedded Systems Essentials' YouTube pe dekh.",
+        },
+    ]
+    # Futures embedded into session 2. Salaries avoid the simulator_prompt banned values
+    # (720000, 780000, 900000) — seed data bypasses the LLM but keeps values realistic.
+    _aryan_futures = [
+        {
+            "type": "expected",
+            "title": "The JEE Road",
+            "narrative_2031": "You wake up at 7:20 in a Pune flat you share with two colleagues. The commute bus leaves at 8:30. Three years into a software services job, the work is stable and you are good at it - you catch bugs others miss, your team lead mentioned it last week. The project is not exciting. You pay your father's home loan EMI every month without having to think about it, which matters more than you expected. Your cousin got into a Hyderabad startup with stock options and your chachi mentions it at every family dinner. Some evenings you open an Arduino IDE and close it an hour later.",
+            "career_trajectory": "JEE coaching -> B.Tech CS -> TCS/Infosys -> mid-level software engineer",
+            "key_decision_point": "Joining JEE coaching in Class 11 because the family WhatsApp group treated rank as the only number that mattered.",
+            "what_you_gain": "Financial stability, family approval, the quiet satisfaction of being reliably good at something.",
+            "what_you_sacrifice": "By 28, explaining a direction change means reopening every family conversation you thought was settled.",
+            "ai_disruption_risk": "high",
+            "annual_salary_2031_inr": 950000,
+            "salary_context": "9.5L in Pune is roughly 65k take-home per month - covers rent and EMI with some left over.",
+        },
+        {
+            "type": "inner_call",
+            "title": "The Build Path",
+            "narrative_2031": "You wake up at 8 AM in a Bengaluru studio, fan running. On your desk: a PCB half-assembled, a multimeter, three browser tabs. You design the hardware layer for an agri-IoT startup - soil sensors, water monitors, devices that survive monsoons. The diagnostic instinct that caught dust in a woofer now catches signal noise in field sensors. Last month you found a latency issue in the firmware no one else had flagged. Your manager sent that note to the CTO. The salary is lower than your JEE-track batchmates. The work feels like yours in a way nothing else has.",
+            "career_trajectory": "B.Tech ECE with electronics focus -> embedded systems internship -> hardware engineer at IoT startup",
+            "key_decision_point": "Choosing ECE over pure CS against family advice.",
+            "what_you_gain": "Work that uses the actual diagnostic ability you have. Creative ownership over physical systems.",
+            "what_you_sacrifice": "Lower starting salary, fewer on-campus placement options, five years of explaining what you do.",
+            "ai_disruption_risk": "low",
+            "annual_salary_2031_inr": 810000,
+            "salary_context": "8.1L at an IoT startup often includes ESOP with strong upside if the company scales - hardware roles are less commoditised than software.",
+        },
+        {
+            "type": "unseen_door",
+            "title": "Hardware Failure Analyst",
+            "narrative_2031": "You wake up at 6:30, fan humming. You are a hardware failure analyst at a defense electronics firm. Your job is to understand why systems break before they break in the field. You receive failed components from aircraft and satellites and reverse-diagnose what went wrong. The role did not have this name when you were in Class 11. It found you through an internship where your supervisor noticed you were the only intern who looked at failed components with curiosity instead of frustration. You stopped explaining your job title two years ago. You just started showing people the work.",
+            "career_trajectory": "B.Tech ECE -> DRDO/ISRO internship -> defense electronics hardware analyst",
+            "key_decision_point": "Taking a DRDO internship application seriously in third year instead of chasing software placement prep.",
+            "what_you_gain": "A rare skill profile, work that directly uses your diagnostic instinct, national-scale impact.",
+            "what_you_sacrifice": "Lower salary than private sector peers for the first five years. Family reassurance comes late.",
+            "ai_disruption_risk": "low",
+            "annual_salary_2031_inr": 760000,
+            "salary_context": "Government CTC of 7.6L comes with housing allowance and pension that private sector rarely matches at this level.",
+        },
+    ]
+
+    profile["session_count"] = 3
+    profile["identity_current"] = session3
+    profile["identity_history"] = [
+        # aawaz_turns, futures, margdarshak embedded per session — what Sidebar drawer reads
+        {
+            "session": 1,
+            "snapshot": session1,
+            "aawaz_turns": _aryan_s1_turns,
+            "futures": [],
+            "margdarshak": [],
+        },
+        {
+            "session": 2,
+            "snapshot": session2,
+            "aawaz_turns": _aryan_s2_turns,
+            "futures": _aryan_futures,
+            "margdarshak": [
+                {
+                    "question": "Engineering ya hardware - dono mein difference kya lagta hai tujhe?",
+                    "answer": "Embedded systems tere liye woh intersection hai jahan dono milte hain. ECE dekh - hardware focus ke saath.",
+                },
+            ],
+        },
+        {
+            "session": 3,
+            "snapshot": session3,
+            "aawaz_turns": _aryan_s3_turns,
+            "futures": [],
+            "margdarshak": [
+                {
+                    "question": "Papa ko kaise samjhaoon?",
+                    "answer": "Unhe 'hardware engineer' mat bol - unhe ISRO, defense PSUs, agri-IoT ka scope dikha. Numbers unhe convince karenge, passion nahi.",
+                },
+            ],
+        },
+    ]
+    profile["last_session"] = str(date.today())
+    # Legacy flat keys kept for any consumers outside the history drawer
+    profile["aawaz_history"] = _aryan_s1_turns + _aryan_s2_turns + _aryan_s3_turns
+    profile["futures_generated"] = [{"session": 2, "futures": _aryan_futures}]
+
+    # InsightBanner reads these two fields — populated at login time
+    profile["identity_delta"] = {
+        "previous_confidence": 8,
+        "current_confidence": 9,
+        "resolved_fears": [
+            "Choosing engineering because everyone expects it, not because he wants it."
+        ],
+        "new_strengths": [
+            "Can hold a complex physical system in his head and reason about failure modes before touching it."
+        ],
+    }
+    profile["last_session_summary"] = {
+        "has_new_move": True,
+        "session_index": 3,
+        "one_line": "Fear of wrong career resolved. Margdarshak has a new move for you.",
+    }
 
     profile["conversation_history"] = [
         {
@@ -200,52 +293,8 @@ def seed_aryan():
         },
     ]
 
-    profile["futures_generated"] = [
-        {
-            "session": 2,
-            "futures": [
-                {
-                    "type": "expected",
-                    "title": "The JEE Road",
-                    "narrative_2031": "You wake up at 7:20 in a Pune flat you share with two colleagues. The commute bus leaves at 8:30. Three years into a software services job, the work is stable and you are good at it - you catch bugs others miss, your team lead mentioned it last week. The project is not exciting. You pay your father's home loan EMI every month without having to think about it, which matters more than you expected. Your cousin got into a Hyderabad startup with stock options and your chachi mentions it at every family dinner. Some evenings you open an Arduino IDE and close it an hour later.",
-                    "career_trajectory": "JEE coaching -> B.Tech CS -> TCS/Infosys -> mid-level software engineer",
-                    "key_decision_point": "Joining JEE coaching in Class 11 because the family WhatsApp group treated rank as the only number that mattered.",
-                    "what_you_gain": "Financial stability, family approval, the quiet satisfaction of being reliably good at something.",
-                    "what_you_sacrifice": "By 28, explaining a direction change means reopening every family conversation you thought was settled.",
-                    "ai_disruption_risk": "high",
-                    "annual_salary_2031_inr": 900000,
-                    "salary_context": "9L in Pune is roughly 62k take-home per month - covers rent and EMI with some left over.",
-                },
-                {
-                    "type": "inner_call",
-                    "title": "The Build Path",
-                    "narrative_2031": "You wake up at 8 AM in a Bengaluru studio, fan running. On your desk: a PCB half-assembled, a multimeter, three browser tabs. You design the hardware layer for an agri-IoT startup - soil sensors, water monitors, devices that survive monsoons. The diagnostic instinct that caught dust in a woofer now catches signal noise in field sensors. Last month you found a latency issue in the firmware no one else had flagged. Your manager sent that note to the CTO. The salary is lower than your JEE-track batchmates. The work feels like yours in a way nothing else has.",
-                    "career_trajectory": "B.Tech ECE with electronics focus -> embedded systems internship -> hardware engineer at IoT startup",
-                    "key_decision_point": "Choosing ECE over pure CS against family advice.",
-                    "what_you_gain": "Work that uses the actual diagnostic ability you have. Creative ownership over physical systems.",
-                    "what_you_sacrifice": "Lower starting salary, fewer on-campus placement options, five years of explaining what you do.",
-                    "ai_disruption_risk": "low",
-                    "annual_salary_2031_inr": 780000,
-                    "salary_context": "7.8L at an IoT startup often includes ESOP with strong upside if the company scales - hardware roles are less commoditised than software.",
-                },
-                {
-                    "type": "unseen_door",
-                    "title": "Hardware Failure Analyst",
-                    "narrative_2031": "You wake up at 6:30, fan humming. You are a hardware failure analyst at a defense electronics firm. Your job is to understand why systems break before they break in the field. You receive failed components from aircraft and satellites and reverse-diagnose what went wrong. The role did not have this name when you were in Class 11. It found you through an internship where your supervisor noticed you were the only intern who looked at failed components with curiosity instead of frustration. You stopped explaining your job title two years ago. You just started showing people the work.",
-                    "career_trajectory": "B.Tech ECE -> DRDO/ISRO internship -> defense electronics hardware analyst",
-                    "key_decision_point": "Taking a DRDO internship application seriously in third year instead of chasing software placement prep.",
-                    "what_you_gain": "A rare skill profile, work that directly uses your diagnostic instinct, national-scale impact.",
-                    "what_you_sacrifice": "Lower salary than private sector peers for the first five years. Family reassurance comes late.",
-                    "ai_disruption_risk": "low",
-                    "annual_salary_2031_inr": 720000,
-                    "salary_context": "Government CTC of 7.2L comes with housing allowance and pension that private sector rarely matches at this level.",
-                },
-            ],
-        }
-    ]
-
     save_student(profile)
-    print("Seeded: demo_aryan (PIN: 1234) - Class 11, 2 sessions, futures generated")
+    print("Seeded: demo_aryan (PIN: 1234) - Class 11, 3 sessions, futures generated")
 
 
 def seed_priya():
@@ -311,32 +360,8 @@ def seed_priya():
         "change_summary": "Both active fears resolved. No longer afraid of choosing wrong — is now focused on choosing deliberately. Family conversation has shifted from resistance to negotiation.",
     }
 
-    profile["session_count"] = 3
-    profile["identity_current"] = session3
-    profile["identity_history"] = [
-        {"session": 1, "snapshot": session1},
-        {"session": 2, "snapshot": session2},
-        {"session": 3, "snapshot": session3},
-    ]
-    profile["last_session"] = str(date.today())
-
-    # InsightBanner reads these two fields — populated at login time
-    profile["identity_delta"] = {
-        "previous_confidence": 8,
-        "current_confidence": 9,
-        "resolved_fears": [
-            "Finding out at 25 that she chose the wrong thing and being unable to admit it.",
-            "Choosing medicine because it is the path of least resistance.",
-        ],
-        "new_strengths": ["Can hold uncertainty long enough to make a real decision rather than a reactive one."],
-    }
-    profile["last_session_summary"] = {
-        "has_new_move": True,
-        "session_index": 3,
-        "one_line": "Both fears resolved. Margdarshak has a move specifically for the family conversation.",
-    }
-
-    profile["aawaz_history"] = [
+    # Aawaz turns split per session — Sidebar drawer reads snap.aawaz_turns
+    _priya_s1_turns = [
         {
             "role": "user",
             "content": "mummy chahti hain main doctor banun. ghar mein sab doctors hain",
@@ -353,6 +378,8 @@ def seed_priya():
             "role": "aawaz",
             "content": "That distinction matters more than it sounds. What's the last thing you looked up just because you were curious, not for exams?",
         },
+    ]
+    _priya_s2_turns = [
         {
             "role": "user",
             "content": "how antibiotic resistance actually happens. not the definition, the actual mechanism. I watched 3 videos",
@@ -362,6 +389,119 @@ def seed_priya():
             "content": "Three videos on mechanism, not definition. That's not studying - that's genuine curiosity about systems. What did you understand by the end that the first video didn't explain?",
         },
     ]
+    _priya_s3_turns = [
+        {
+            "role": "user",
+            "content": "kya main NEET ke bina bhi biology mein kuch kar sakti hoon",
+        },
+        {
+            "role": "aawaz",
+            "content": "Haan - aur yeh sawaal poochna already ek signal hai. Jo cheez tujhe antibiotic resistance ke mechanism tak le gayi - woh researcher ki curiosity hai, not a clinician's. IISER BS-MS specifically recruits this kind of curiosity.",
+        },
+        {"role": "user", "content": "but ghar waale samjhenge nahi"},
+        {
+            "role": "aawaz",
+            "content": "Unke liye 'doctor' ka matlab 'stable aur respected' hai - that's not wrong, that's real. IISER graduates go into ISRO, WHO, top pharma research. Ek kaam kar - IISER Pune ka placement data dekh.",
+        },
+    ]
+    # Salaries avoid simulator_prompt banned values: 720000, 780000, 900000
+    _priya_futures = [
+        {
+            "type": "expected",
+            "title": "The NEET Path",
+            "narrative_2031": "You wake up at 6 AM in a hostel room shared with two other residents. First year of medical residency. The 14-hour shift starts at 7. You are genuinely good at diagnosis - your attending notices. The pattern-recognition ability that made you watch three antibiotic resistance videos at 14 now helps you catch differential diagnoses faster than your batchmates. You are also tired in a way that doesn't fully go away. Mummy video calls every Sunday. The why-does-this-work question that used to keep you up at night is still there. There is not much time for it.",
+            "career_trajectory": "NEET -> MBBS -> MD Residency -> Specialist",
+            "key_decision_point": "Entering NEET coaching because the family path had no visible fork in it.",
+            "what_you_gain": "Genuine patient impact, family pride, and the satisfaction of being very good at a hard thing.",
+            "what_you_sacrifice": "The mechanism-level curiosity that drives you goes unfed for 10+ years while you build clinical competence.",
+            "ai_disruption_risk": "medium",
+            "annual_salary_2031_inr": 600000,
+            "salary_context": "6L during residency is below most peer fields but grows sharply after: senior consultants earn 40-80L. The timeline to financial stability is longer than most careers.",
+        },
+        {
+            "type": "inner_call",
+            "title": "The Research Path",
+            "narrative_2031": "You wake up at 8:30 near the IISER campus. On your screen: a paper on AMR spread patterns you've been building for three months. You work in a computational biology lab - your job is to model how antibiotic resistance moves across populations. The three-video rabbit hole at 14 was the first version of what you do now. Your work has been cited by a WHO working group. Mummy asked how that compares to being a doctor and you sent her the citation link. She didn't fully understand it but she showed her friends.",
+            "career_trajectory": "IISER BS-MS -> PhD in computational biology or epidemiology -> research scientist",
+            "key_decision_point": "Choosing IISER over NEET coaching against family expectation.",
+            "what_you_gain": "Work that feeds the mechanism-level curiosity that defines how you think. Impact at population scale.",
+            "what_you_sacrifice": "Five years of your family not fully understanding what you do. The word 'doctor' never applies.",
+            "ai_disruption_risk": "low",
+            "annual_salary_2031_inr": 740000,
+            "salary_context": "7.4L for a junior research scientist at a government lab grows significantly with seniority and comes with publication-based career capital that compounds over time.",
+        },
+        {
+            "type": "unseen_door",
+            "title": "Outbreak Intelligence Analyst",
+            "narrative_2031": "You wake up at 7 AM. Your phone has three alerts from a disease surveillance dashboard you helped build - a cluster in Rajasthan that looks anomalous. By 9 AM you're on a call with the state health team. You work at an IDSP-linked public health intelligence unit. Your job is to spot the pattern before it becomes a crisis. You don't treat patients. You protect millions of them before they ever get sick. This role didn't have a name when you were in Class 10. You stopped apologising for not being a doctor about two years ago.",
+            "career_trajectory": "BSc Public Health or Epidemiology -> MPH -> government disease surveillance",
+            "key_decision_point": "Taking an epidemiology elective seriously instead of treating it as a fallback.",
+            "what_you_gain": "Pattern-recognition at national scale, genuine public health impact, a role that will matter more in 2031 than it did in 2024.",
+            "what_you_sacrifice": "'Outbreak analyst' takes explaining. Five years of 'but why not NEET' at family dinners.",
+            "ai_disruption_risk": "low",
+            "annual_salary_2031_inr": 750000,
+            "salary_context": "7.5L at a government public health role includes DA, HRA, and pension that private sector doesn't match - effective CTC is closer to 10L.",
+        },
+    ]
+
+    profile["session_count"] = 3
+    profile["identity_current"] = session3
+    profile["identity_history"] = [
+        # aawaz_turns, futures, margdarshak embedded per session — what Sidebar drawer reads
+        {
+            "session": 1,
+            "snapshot": session1,
+            "aawaz_turns": _priya_s1_turns,
+            "futures": [],
+            "margdarshak": [],
+        },
+        {
+            "session": 2,
+            "snapshot": session2,
+            "aawaz_turns": _priya_s2_turns,
+            "futures": _priya_futures,
+            "margdarshak": [
+                {
+                    "question": "NEET ke bina biology mein kuch hota hai?",
+                    "answer": "IISER BS-MS programs specifically recruit curiosity-driven students. NEET is one door — not the only one.",
+                },
+            ],
+        },
+        {
+            "session": 3,
+            "snapshot": session3,
+            "aawaz_turns": _priya_s3_turns,
+            "futures": [],
+            "margdarshak": [
+                {
+                    "question": "Ghar waalo ko kaise convince karoon?",
+                    "answer": "Don't say 'I don't want to be a doctor.' Say 'What if I could have the same stability and more impact?' Then show IISER Pune placement data - numbers convert faster than passion.",
+                },
+            ],
+        },
+    ]
+    profile["last_session"] = str(date.today())
+    # Legacy flat keys kept for any consumers outside the history drawer
+    profile["aawaz_history"] = _priya_s1_turns + _priya_s2_turns + _priya_s3_turns
+    profile["futures_generated"] = [{"session": 2, "futures": _priya_futures}]
+
+    # InsightBanner reads these two fields — populated at login time
+    profile["identity_delta"] = {
+        "previous_confidence": 8,
+        "current_confidence": 9,
+        "resolved_fears": [
+            "Finding out at 25 that she chose the wrong thing and being unable to admit it.",
+            "Choosing medicine because it is the path of least resistance.",
+        ],
+        "new_strengths": [
+            "Can hold uncertainty long enough to make a real decision rather than a reactive one."
+        ],
+    }
+    profile["last_session_summary"] = {
+        "has_new_move": True,
+        "session_index": 3,
+        "one_line": "Both fears resolved. Margdarshak has a move specifically for the family conversation.",
+    }
 
     profile["conversation_history"] = [
         {
@@ -394,52 +534,8 @@ def seed_priya():
         },
     ]
 
-    profile["futures_generated"] = [
-        {
-            "session": 2,
-            "futures": [
-                {
-                    "type": "expected",
-                    "title": "The NEET Path",
-                    "narrative_2031": "You wake up at 6 AM in a hostel room shared with two other residents. First year of medical residency. The 14-hour shift starts at 7. You are genuinely good at diagnosis - your attending notices. The pattern-recognition ability that made you watch three antibiotic resistance videos at 14 now helps you catch differential diagnoses faster than your batchmates. You are also tired in a way that doesn't fully go away. Mummy video calls every Sunday. The why-does-this-work question that used to keep you up at night is still there. There is not much time for it.",
-                    "career_trajectory": "NEET -> MBBS -> MD Residency -> Specialist",
-                    "key_decision_point": "Entering NEET coaching because the family path had no visible fork in it.",
-                    "what_you_gain": "Genuine patient impact, family pride, and the satisfaction of being very good at a hard thing.",
-                    "what_you_sacrifice": "The mechanism-level curiosity that drives you goes unfed for 10+ years while you build clinical competence.",
-                    "ai_disruption_risk": "medium",
-                    "annual_salary_2031_inr": 600000,
-                    "salary_context": "6L during residency is below most peer fields but grows sharply after: senior consultants earn 40-80L. The timeline to financial stability is longer than most careers.",
-                },
-                {
-                    "type": "inner_call",
-                    "title": "The Research Path",
-                    "narrative_2031": "You wake up at 8:30 near the IISER campus. On your screen: a paper on AMR spread patterns you've been building for three months. You work in a computational biology lab - your job is to model how antibiotic resistance moves across populations. The three-video rabbit hole at 14 was the first version of what you do now. Your work has been cited by a WHO working group. Mummy asked how that compares to being a doctor and you sent her the citation link. She didn't fully understand it but she showed her friends.",
-                    "career_trajectory": "IISER BS-MS -> PhD in computational biology or epidemiology -> research scientist",
-                    "key_decision_point": "Choosing IISER over NEET coaching against family expectation.",
-                    "what_you_gain": "Work that feeds the mechanism-level curiosity that defines how you think. Impact at population scale.",
-                    "what_you_sacrifice": "Five years of your family not fully understanding what you do. The word 'doctor' never applies.",
-                    "ai_disruption_risk": "low",
-                    "annual_salary_2031_inr": 720000,
-                    "salary_context": "7.2L for a junior research scientist at a government lab grows significantly with seniority and comes with publication-based career capital that compounds over time.",
-                },
-                {
-                    "type": "unseen_door",
-                    "title": "Outbreak Intelligence Analyst",
-                    "narrative_2031": "You wake up at 7 AM. Your phone has three alerts from a disease surveillance dashboard you helped build - a cluster in Rajasthan that looks anomalous. By 9 AM you're on a call with the state health team. You work at an IDSP-linked public health intelligence unit. Your job is to spot the pattern before it becomes a crisis. You don't treat patients. You protect millions of them before they ever get sick. This role didn't have a name when you were in Class 10. You stopped apologising for not being a doctor about two years ago.",
-                    "career_trajectory": "BSc Public Health or Epidemiology -> MPH -> government disease surveillance",
-                    "key_decision_point": "Taking an epidemiology elective seriously instead of treating it as a fallback.",
-                    "what_you_gain": "Pattern-recognition at national scale, genuine public health impact, a role that will matter more in 2031 than it did in 2024.",
-                    "what_you_sacrifice": "'Outbreak analyst' takes explaining. Five years of 'but why not NEET' at family dinners.",
-                    "ai_disruption_risk": "low",
-                    "annual_salary_2031_inr": 750000,
-                    "salary_context": "7.5L at a government public health role includes DA, HRA, and pension that private sector doesn't match - effective CTC is closer to 10L.",
-                },
-            ],
-        }
-    ]
-
     save_student(profile)
-    print("Seeded: demo_priya (PIN: 1234) - Class 10, 2 sessions, futures generated")
+    print("Seeded: demo_priya (PIN: 1234) - Class 10, 3 sessions, futures generated")
 
 
 if __name__ == "__main__":

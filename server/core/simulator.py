@@ -23,13 +23,13 @@ _EXPECTED_TYPES = {"expected", "inner_call", "unseen_door"}
 _REQUIRED_FUTURE_FIELDS = [
     "type",
     "title",
-    "narrative_2031",
+    "narrative",
     "career_trajectory",
     "key_decision_point",
     "what_you_gain",
     "what_you_sacrifice",
     "ai_disruption_risk",
-    "annual_salary_2031_inr",
+    "annual_salary_inr",
     "salary_context",
 ]
 
@@ -50,7 +50,7 @@ _FALLBACK_FUTURES = {
         {
             "type": "expected",
             "title": "The Safe Road",
-            "narrative_2031": (
+            "narrative": (
                 "You wake up at 7:15 AM in a one-bedroom flat in Pune. "
                 "The alarm cuts through a half-dream. Your body takes a moment to agree to be awake. "
                 "Phone screen too bright. You have a deployment review at 10 AM. "
@@ -72,13 +72,13 @@ _FALLBACK_FUTURES = {
             "what_you_gain": "Financial stability, family approval, and the quiet pride of being reliably good at something.",
             "what_you_sacrifice": "By 28, changing direction means explaining it to everyone again. That cost is real.",
             "ai_disruption_risk": "high",
-            "annual_salary_2031_inr": 900000,
-            "salary_context": "9L pre-tax in Pune is roughly 62-65k take-home, which covers rent and EMI comfortably with some left over.",
+            "annual_salary_inr": 1050000,
+            "salary_context": "10.5L pre-tax in Pune is roughly 62-65k take-home, which covers rent and EMI comfortably with some left over.",
         },
         {
             "type": "inner_call",
             "title": "The Thing You Keep Coming Back To",
-            "narrative_2031": (
+            "narrative": (
                 "You wake up at 9 AM in a shared studio in Bangalore. "
                 "No alarm. You feel it before you open your eyes: something to finish today. "
                 "On your desk: a sketchbook, three browser tabs with half-finished references, a coffee going cold. "
@@ -97,13 +97,13 @@ _FALLBACK_FUTURES = {
             "what_you_gain": "Work that feels meaningful, creative ownership, a craft that keeps growing.",
             "what_you_sacrifice": "Income stability in your early 20s, family reassurance, a clear conventional path.",
             "ai_disruption_risk": "medium",
-            "annual_salary_2031_inr": 780000,
-            "salary_context": "7.8L at a startup often comes with ESOP grants that could be worth more if the company grows, though that is not guaranteed.",
+            "annual_salary_inr": 920000,
+            "salary_context": "9.2L at a startup often comes with ESOP grants that could be worth more if the company grows, though that is not guaranteed.",
         },
         {
             "type": "unseen_door",
             "title": "The Version No One Suggested",
-            "narrative_2031": (
+            "narrative": (
                 "You wake up at 6 AM in a room that doubles as an edit suite. "
                 "The fan hums. You lie there for a moment, aware of what you need to finish today. "
                 "You are in the third week of a documentary shoot for a national education NGO. "
@@ -125,8 +125,8 @@ _FALLBACK_FUTURES = {
             "what_you_gain": "A career built from genuine strengths, work that solves real problems, a rare skill profile.",
             "what_you_sacrifice": "A clear answer to what do you do for the first five years. Family reassurance comes late.",
             "ai_disruption_risk": "low",
-            "annual_salary_2031_inr": 720000,
-            "salary_context": "7.2L at an NGO is below market but many such roles include accommodation, travel, and non-monetary benefits that are hard to price.",
+            "annual_salary_inr": 840000,
+            "salary_context": "8.4L at an NGO is below market but many such roles include accommodation, travel, and non-monetary benefits that are hard to price.",
         },
     ],
     "_fallback": True,
@@ -173,7 +173,7 @@ def _get_fallback_futures(identity_json: dict) -> dict:
         fallback["futures"][0][
             "career_trajectory"
         ] = "B.Com / BA -> entry-level corporate -> mid-level manager"
-        fallback["futures"][0]["narrative_2031"] = (
+        fallback["futures"][0]["narrative"] = (
             "You wake up at 8 AM in a two-bedroom flat you share with a colleague. "
             "Commute is 45 minutes. The job pays reliably and your parents have stopped asking "
             "when you will get settled. You manage a small team now. "
@@ -189,16 +189,14 @@ def _get_fallback_futures(identity_json: dict) -> dict:
 
 def _fix_narrative_length(futures: list) -> list:
     for future in futures:
-        narrative = future.get("narrative_2031", "")
+        narrative = future.get("narrative", "")
         if not narrative:
             continue
         words = narrative.split()
         if len(words) > 250:
             trimmed = " ".join(words[:230])
             cut = trimmed.rfind(".")
-            future["narrative_2031"] = (
-                trimmed[: cut + 1] if cut > 150 else trimmed + "."
-            )
+            future["narrative"] = trimmed[: cut + 1] if cut > 150 else trimmed + "."
     return futures
 
 
@@ -208,19 +206,15 @@ def _fill_missing_fields(futures: list) -> list:
         for field in _REQUIRED_FUTURE_FIELDS:
             if field not in future:
                 future[field] = (
-                    0
-                    if field == "annual_salary_2031_inr"
-                    else "Information unavailable."
+                    0 if field == "annual_salary_inr" else "Information unavailable."
                 )
         # Coerce salary to int (model sometimes returns string placeholder)
-        salary = future.get("annual_salary_2031_inr")
+        salary = future.get("annual_salary_inr")
         if isinstance(salary, str):
             try:
-                future["annual_salary_2031_inr"] = int(
-                    re.sub(r"[^\d]", "", salary) or "0"
-                )
+                future["annual_salary_inr"] = int(re.sub(r"[^\d]", "", salary) or "0")
             except (ValueError, TypeError):
-                future["annual_salary_2031_inr"] = 0
+                future["annual_salary_inr"] = 0
     return futures
 
 

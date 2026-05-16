@@ -520,6 +520,11 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
     for obs in observations:
         profile = add_micro_observation(profile, obs)
 
+    # BUG 1 FIX: persist detected language so Margdarshak and downstream routes
+    # use the correct language instead of always defaulting to "english"
+    if req.language:
+        profile["language_preference"] = req.language
+
     save_student(profile)
 
     already_run = profile.get("darpan_run", False)
