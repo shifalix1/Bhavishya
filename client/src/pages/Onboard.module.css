@@ -326,3 +326,17 @@
     border-bottom: none;
   }
 }
+
+.pinWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 160px;
+  width: 100%;
+}
+
+.pinWrapper .input {
+  width: 100%;
+  max-width: none;
+  padding-right: 36px;
+}

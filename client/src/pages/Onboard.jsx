@@ -234,7 +234,7 @@ export default function Onboard({ onDone }) {
               <label className={styles.label} htmlFor="pin">
                 4-digit PIN
               </label>
-              <div style={{ position: "relative", display: "inline-block" }}>
+              <div className={styles.pinWrapper}>
                 <input
                   id="pin"
                   className={`${styles.input} ${styles.pinInput}`}
