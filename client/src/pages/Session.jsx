@@ -25,11 +25,11 @@ export default function Session({
       onGoToAawaz?.();
     } else if (choice === "margdarshak") {
       onGoToMargdarshak?.();
-    } else if (choice === "skip") {
-      setPhase("darpan_existing");
     } else if (choice === "paste" && pasteText) {
+      // "write" path in SessionIntro calls onChoose("paste", text)
       handleReadyForDarpan(pasteText);
     }
+    // note: "skip" branch removed — SessionIntro never emits it
   };
 
   const handleReadyForDarpan = async (combinedInput) => {

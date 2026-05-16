@@ -14,6 +14,7 @@ export default function Onboard({ onDone }) {
   const [pin, setPin] = useState("");
   const [name, setName] = useState("");
   const [grade, setGrade] = useState(null);
+  const [language, setLanguage] = useState("english");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,6 +33,7 @@ export default function Onboard({ onDone }) {
     setError("");
     try {
       const res = await api.login(u, p);
+      // language_preference comes from the backend on login; frontend default is english
       setCache(res);
       onDone(res);
     } catch (e) {
@@ -50,7 +52,7 @@ export default function Onboard({ onDone }) {
     setError("");
     try {
       const res = await api.register(u, p, n, grade);
-      setCache(res);
+      setCache({ ...res, language_preference: language });
       onDone(res);
     } catch (e) {
       setError(e.message || "Registration failed.");
@@ -183,6 +185,32 @@ export default function Onboard({ onDone }) {
                   </div>
                 </div>
               </>
+            )}
+
+            {tab === "register" && (
+              <div className={styles.field}>
+                <div className={styles.label}>Preferred language</div>
+                <div className={styles.gradeRow}>
+                  <button
+                    type="button"
+                    className={`${styles.gradeBtn} ${language === "english" ? styles.gradeBtnActive : ""}`}
+                    onClick={() => setLanguage("english")}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.gradeBtn} ${language === "hinglish" ? styles.gradeBtnActive : ""}`}
+                    onClick={() => setLanguage("hinglish")}
+                  >
+                    Hinglish
+                  </button>
+                </div>
+                <span className={styles.hint}>
+                  Aawaz will talk to you in this language. You can change it
+                  inside the app too.
+                </span>
+              </div>
             )}
 
             <div className={styles.field}>

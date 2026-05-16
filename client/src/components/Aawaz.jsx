@@ -100,6 +100,8 @@ export default function Aawaz({ student, onReadyForDarpan }) {
   const lastInterimRef = useRef("");
   const finalTranscriptRef = useRef("");
 
+  const sendRef = useRef(null);
+
   const dismissToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -314,6 +316,11 @@ export default function Aawaz({ student, onReadyForDarpan }) {
     ],
   );
 
+  // Keep sendRef current so startRec's auto-submit always calls the latest send
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
   const handleKey = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -387,7 +394,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         if (text) {
           stopRec();
           setInput("");
-          send(text);
+          sendRef.current?.(text);
         } else {
           stopRec();
         }
@@ -424,7 +431,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       setInterimText("");
       if (text) {
         setInput("");
-        send(text);
+        sendRef.current?.(text);
       }
     };
 
@@ -442,7 +449,7 @@ export default function Aawaz({ student, onReadyForDarpan }) {
       recStateRef.current = "idle";
       setRecState("idle");
     }
-  }, [stopSpeaking, send, stopRec, addToast, startWaveform, language]);
+  }, [stopSpeaking, stopRec, addToast, startWaveform, language]);
 
   const handleImage = useCallback(
     async (e) => {

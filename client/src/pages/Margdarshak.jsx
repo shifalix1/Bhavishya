@@ -127,6 +127,9 @@ export default function Margdarshak({
     setLoading(true);
     setError("");
     try {
+      // BUG 4 NOTE: language_preference must be written to cache during login
+      // in Onboard.jsx (on the /login or /aawaz/chat response). If it's missing
+      // here, it defaults to "english" correctly — but fix the cache write upstream.
       const res = await api.margdarshakGuidance(
         student.uid,
         student.name,

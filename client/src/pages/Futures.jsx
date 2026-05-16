@@ -42,10 +42,12 @@ function FutureSkeleton({ index }) {
 export default function Futures({
   student,
   shouldSimulate,
+  futures,
+  onFuturesReady,
   onGoToSession,
   onGoToMargdarshak,
 }) {
-  const [futures, setFutures] = useState(null);
+  // futures state is lifted to Dashboard so it survives tab switches (Bug 6 fix)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -54,7 +56,7 @@ export default function Futures({
     setError("");
     try {
       const res = await api.simulate(student.name, student.grade, student.uid);
-      setFutures(res.futures || []);
+      onFuturesReady?.(res.futures || []);
     } catch (e) {
       setError(e.message || "Simulation failed. Try again.");
     } finally {

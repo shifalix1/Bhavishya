@@ -63,6 +63,7 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
   const [shouldSimulate, setShouldSimulate] = useState(
     !!initialStudent.has_identity,
   );
+  const [futures, setFutures] = useState(null);
   const [aawazDarpanLoading, setAawazDarpanLoading] = useState(false);
   const [aawazError, setAawazError] = useState("");
   const [margdarshakPrefill, setMargdarshakPrefill] = useState(null);
@@ -171,6 +172,7 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
         >
           <div className={styles.content}>
             <Margdarshak
+              key={student.uid}
               student={student}
               onGoToSession={() => setTab("session")}
               prefillQuestion={margdarshakPrefill}
@@ -189,6 +191,8 @@ export default function Dashboard({ student: initialStudent, onLogout }) {
             <Futures
               student={student}
               shouldSimulate={shouldSimulate}
+              futures={futures}
+              onFuturesReady={setFutures}
               onGoToSession={() => setTab("session")}
               onGoToMargdarshak={handleGoToMargdarshak}
             />
