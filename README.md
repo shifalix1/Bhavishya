@@ -50,7 +50,7 @@ But the architecture is not India-specific. The psychological fingerprinting, th
 
 ```
 
-![Bhavishya system architecture](assets/architecture.png)
+![Bhavishya system architecture](client/src/assets/architecture.png)
 
 ```
 

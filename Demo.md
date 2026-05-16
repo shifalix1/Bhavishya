@@ -2,7 +2,7 @@
 
 ## Live Demo
 
-**URL:** https://bhavishya.vercel.app
+**URL:** https://bhavishya.shifalisingh.in
 
 If the app takes 30-60 seconds to load on first visit, that's the free backend waking up. Refresh once and it will be instant after that.
 

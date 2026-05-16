@@ -16,6 +16,7 @@ export default function Onboard({ onDone }) {
   const [language, setLanguage] = useState("english");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPin, setShowPin] = useState(false);
 
   const [username, setUsername] = useState(() => getCached()?.username || "");
   const [tab, setTab] = useState("login");
@@ -90,7 +91,19 @@ export default function Onboard({ onDone }) {
   return (
     <div className={styles.wrap}>
       <header className={styles.topbar}>
-        <span className={styles.brandName}>Bhavishya</span>
+        <span className={styles.brandName}>
+          <img
+            src="/favicon.png"
+            alt=""
+            style={{
+              width: 24,
+              height: 24,
+              marginRight: 8,
+              verticalAlign: "middle",
+            }}
+          />
+          Bhavishya
+        </span>
         <div className={styles.topRight}>
           <span className="caption">Gemma 4 Good Hackathon</span>
           <ThemeToggle />
@@ -140,7 +153,7 @@ export default function Onboard({ onDone }) {
               <input
                 id="username"
                 className={styles.input}
-                placeholder="aryan9, priya_singh..."
+                placeholder="Enter a username..."
                 value={username}
                 onChange={(e) =>
                   setUsername(
@@ -219,10 +232,7 @@ export default function Onboard({ onDone }) {
               </div>
             )}
 
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="pin">
-                4-digit PIN
-              </label>
+            <div style={{ position: "relative", maxWidth: "160px" }}>
               <input
                 id="pin"
                 className={`${styles.input} ${styles.pinInput}`}
@@ -233,14 +243,56 @@ export default function Onboard({ onDone }) {
                 }
                 onKeyDown={handleKey}
                 inputMode="numeric"
-                type="password"
+                type={showPin ? "text" : "password"}
                 maxLength={4}
               />
-              {tab === "register" && (
-                <span className={styles.hint}>
-                  Remember this. It is the only way to log in on other devices.
-                </span>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowPin(!showPin)}
+                style={{
+                  position: "absolute",
+                  right: "10px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--text-muted)",
+                  padding: 0,
+                  display: "flex",
+                }}
+              >
+                {showPin ? (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+                    <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
             </div>
 
             {error && <div className={styles.error}>{error}</div>}
