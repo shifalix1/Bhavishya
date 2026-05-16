@@ -87,7 +87,10 @@ def _get_client() -> genai.Client:
 
 
 def run_darpan(
-    student_input: str, grade: int, previous_session: dict | None = None
+    student_input: str,
+    grade: int,
+    previous_session: dict | None = None,
+    language_preference: str = "english",
 ) -> dict:
     """
     Synchronous entry point — called via asyncio.to_thread from the FastAPI route.
@@ -96,7 +99,7 @@ def run_darpan(
     If the model still manages to return invalid JSON (extremely rare in JSON mode),
     we fall back gracefully instead of crashing.
     """
-    system_prompt = _load_prompt()
+    system_prompt = _load_prompt().format(language_preference=language_preference)
 
     user_msg = f"Grade: {grade}\nStudent says: {student_input}"
     if previous_session:

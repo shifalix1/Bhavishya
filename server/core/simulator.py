@@ -226,13 +226,14 @@ def run_simulator(
     grade: int,
     session_count: int,
     career_data: list,
+    language_preference: str = "english",
 ) -> dict:
     """
     Synchronous entry point — called via asyncio.to_thread from the FastAPI route.
 
     JSON mode means response.text is already valid JSON; no regex required.
     """
-    system_prompt = _load_prompt()
+    system_prompt = _load_prompt().format(language_preference=language_preference)
 
     bridge_parts = []
     if identity_json.get("thinking_style"):

@@ -237,16 +237,25 @@ async def run_aawaz_chat(
     Both cloud and Ollama calls are wrapped in asyncio.to_thread so the event loop
     is never blocked, even under concurrent load.
     """
-    base_prompt = _load_system_prompt()
+    base_prompt = _load_system_prompt().format(language_preference=language)
 
-    lang_instruction = (
-        "\n\nIMPORTANT: Student is in ENGLISH mode. "
-        "Reply entirely in clear, warm English. No Hindi mixing."
-        if language == "english"
-        else "\n\nIMPORTANT: Student is in HINGLISH mode. "
-        "Mix Hindi and English naturally like an older sibling texting. "
-        "Roman script only, no Devanagari. Keep it warm and casual."
-    )
+    if language == "english":
+        lang_instruction = (
+            "\n\nIMPORTANT: Student is in ENGLISH mode. "
+            "Reply entirely in clear, warm English. No Hindi mixing."
+        )
+    elif language == "hindi":
+        lang_instruction = (
+            "\n\nIMPORTANT: Student is in HINDI mode. "
+            "Reply entirely in Hindi using Roman script only. No Devanagari. "
+            "Keep it warm and natural like an older sibling texting."
+        )
+    else:
+        lang_instruction = (
+            "\n\nIMPORTANT: Student is in HINGLISH mode. "
+            "Mix Hindi and English naturally like an older sibling texting. "
+            "Roman script only, no Devanagari. Keep it warm and casual."
+        )
 
     output_rule = (
         "\n\nOUTPUT FORMAT: Plain conversational text only. "

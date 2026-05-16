@@ -143,7 +143,7 @@ def run_margdarshak_guidance(
         "generated_at": str (ISO UTC)
     }
     """
-    system_prompt = _load_guidance_prompt()
+    system_prompt = _load_guidance_prompt().format(language_preference=language)
 
     context_lines = [
         f"detected_language: {language}",
@@ -213,7 +213,7 @@ def run_margdarshak_question(
     Answer one student question about their guidance.
     Returns (answer_text, is_fallback).
     """
-    system_prompt = _load_question_prompt()
+    system_prompt = _load_question_prompt().format(language_preference=language)
 
     user_msg = "\n".join(
         [

@@ -59,7 +59,6 @@ from core.memory import (
     trim_conversation_history,
     needs_compression,
     compress_history,
-    # FIX: new functions added in memory.py Round 2
     save_session_snapshot,
     get_sessions_structured,
 )
@@ -208,6 +207,7 @@ class RegisterRequest(BaseModel):
     pin: str
     name: str
     grade: int
+    language_preference: Optional[str] = "english"
 
 
 class LoginRequest(BaseModel):
@@ -257,6 +257,11 @@ class MargdarshakQuestionRequest(BaseModel):
     guidance: Optional[dict] = None
 
 
+class PreferenceRequest(BaseModel):
+    uid: str
+    language: str
+
+
 class AawazTranscribeRequest(BaseModel):
     name: str
     grade: int
@@ -295,7 +300,7 @@ async def health():
     }
 
 
-# ── Auth routes ───────────────────────────────────────────────────────────────
+# Auth routes
 
 
 @auth_router.post("/register")
@@ -319,6 +324,8 @@ async def register(req: RegisterRequest, request: Request):
         username=req.username.lower(),
         pin=req.pin,
     )
+    # Persist the language preference chosen at registration
+    profile["language_preference"] = req.language_preference or "hinglish"
     save_student(profile)
     logger.info(f"New student registered: {req.username} (grade {req.grade})")
 
@@ -331,6 +338,7 @@ async def register(req: RegisterRequest, request: Request):
         "session_count": 0,
         "has_identity": False,
         "has_futures": False,
+        "language_preference": profile["language_preference"],
     }
 
 
@@ -356,14 +364,12 @@ async def login(req: LoginRequest, request: Request):
 
     logger.info(f"Login: {req.username} | session #{profile.get('session_count', 0)}")
 
-    # FIX: compute identity_delta and last_session_summary for Dashboard InsightBanner
     identity_current = profile.get("identity_current", {})
     sessions = profile.get("sessions", [])
     identity_delta = {}
     last_session_summary = None
 
     if len(sessions) >= 2:
-        # Sort by session number to guarantee correct prev/current pairing
         sorted_sessions = sorted(sessions, key=lambda s: s.get("session", 0))
         prev_snap_identity = sorted_sessions[-2].get("identity") or {}
         identity_delta = get_identity_delta(prev_snap_identity, identity_current)
@@ -402,9 +408,10 @@ async def login(req: LoginRequest, request: Request):
         "session_count": profile.get("session_count", 0),
         "has_identity": bool(profile.get("identity_current")),
         "has_futures": bool(profile.get("futures_generated")),
-        # FIX: new fields for Dashboard InsightBanner
         "identity_delta": identity_delta,
         "last_session_summary": last_session_summary,
+        # BUG 4 FIX: return language_preference so frontend cache stays correct for returning users
+        "language_preference": profile.get("language_preference", "english"),
     }
 
 
@@ -424,6 +431,7 @@ async def onboard(req: OnboardRequest, request: Request):
             "session_count": profile.get("session_count", 0),
             "has_identity": bool(profile.get("identity_current")),
             "has_futures": bool(profile.get("futures_generated")),
+            "language_preference": profile.get("language_preference", "hinglish"),
         }
 
     profile = create_new_profile(name=req.name.strip(), grade=req.grade, uid=req.uid)
@@ -439,10 +447,11 @@ async def onboard(req: OnboardRequest, request: Request):
         "session_count": 0,
         "has_identity": False,
         "has_futures": False,
+        "language_preference": profile.get("language_preference", "hinglish"),
     }
 
 
-# ── Aawaz routes ──────────────────────────────────────────────────────────────
+# Aawaz routes
 
 
 @aawaz_router.post("/transcribe")
@@ -508,7 +517,6 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
             detail="AI is temporarily unavailable. Please try again in a moment.",
         )
 
-    # FIX: stamp session_index on aawaz messages at write time
     session_idx = profile.get("session_count", 0)
     history.append(
         {"role": "user", "content": req.message, "session_index": session_idx}
@@ -520,8 +528,6 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
     for obs in observations:
         profile = add_micro_observation(profile, obs)
 
-    # BUG 1 FIX: persist detected language so Margdarshak and downstream routes
-    # use the correct language instead of always defaulting to "english"
     if req.language:
         profile["language_preference"] = req.language
 
@@ -545,7 +551,7 @@ async def aawaz_chat(req: AawazChatRequest, request: Request):
     }
 
 
-# ── Core routes ───────────────────────────────────────────────────────────────
+# Core routes
 
 
 @core_router.post("/session")
@@ -572,7 +578,11 @@ async def run_session(req: SessionRequest, request: Request):
         )
 
     identity = await asyncio.to_thread(
-        run_darpan, enriched_input, req.grade, previous_identity
+        run_darpan,
+        enriched_input,
+        req.grade,
+        previous_identity,
+        profile.get("language_preference", "english"),
     )
 
     thinking = identity.get("thinking_style", "")
@@ -597,12 +607,8 @@ async def run_session(req: SessionRequest, request: Request):
     profile["darpan_run"] = True
     profile = add_message(profile, "user", req.student_input)
 
-    # Rolling summary check before save
     profile = await _maybe_compress(profile)
     profile = trim_conversation_history(profile, limit=_CONV_HISTORY_LIMIT)
-
-    # FIX: persist structured session snapshot so /history/{uid} and Sidebar drawer
-    # can read real data instead of flat list divided by session count.
     profile = save_session_snapshot(profile)
 
     save_student(profile)
@@ -644,6 +650,7 @@ async def simulate(req: SimulateRequest, request: Request):
         grade=profile["grade"],
         session_count=profile.get("session_count", 1),
         career_data=career_data,
+        language_preference=profile.get("language_preference", "english"),
     )
 
     if "futures_generated" not in profile:
@@ -655,7 +662,6 @@ async def simulate(req: SimulateRequest, request: Request):
         }
     )
 
-    # FIX: update snapshot with futures now that they're generated
     profile = save_session_snapshot(profile)
     save_student(profile)
 
@@ -754,7 +760,6 @@ async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request
         }
     )
 
-    # FIX: update snapshot so Margdarshak Q&A appears in Sidebar session drawer
     profile = save_session_snapshot(profile)
     save_student(profile)
 
@@ -768,16 +773,29 @@ async def margdarshak_question(req: MargdarshakQuestionRequest, request: Request
 @core_router.get("/history/{uid}")
 @limiter.limit("20/minute")
 async def get_history(uid: str, request: Request):
-    """
-    FIX: replaces the broken flat-list division approach.
-    Now calls get_sessions_structured() which uses session_index stamps
-    written at message time — correct regardless of session length variance.
-    """
     profile = load_by_username(uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Student not found.")
 
     return get_sessions_structured(profile)
+
+
+@auth_router.post("/preference")
+@limiter.limit("20/minute")
+async def set_preference(req: PreferenceRequest, request: Request):
+    valid_languages = {"english", "hinglish", "hindi"}
+    if req.language not in valid_languages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"language must be one of: {', '.join(valid_languages)}",
+        )
+    profile = load_by_username(req.uid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    profile["language_preference"] = req.language
+    save_student(profile)
+    logger.info(f"[PREFERENCE] {req.uid} -> {req.language}")
+    return {"uid": req.uid, "language_preference": req.language}
 
 
 # Router registration
