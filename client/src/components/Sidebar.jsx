@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import ThemeToggle from "./ThemeToggle";
 import { api } from "../lib/api";
 import styles from "./Sidebar.module.css";
@@ -350,14 +350,33 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
   const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [openSession, setOpenSession] = useState(null);
+  const [language, setLanguage] = useState(
+    student.language_preference || "english",
+  );
 
   // fetchingRef: guards against duplicate in-flight fetches.
-  // historyRef: mirrors the history state value so useCallback closures can
-  //   read it without needing history in their dep arrays (which caused every
-  //   history update to create a new loadHistory/handleSessionClick reference,
-  //   risking duplicate fetches on rapid clicks despite the fetchingRef guard).
   const fetchingRef = useRef(false);
   const historyRef = useRef(null);
+
+  // CRITICAL FIX: fetch history from backend on mount so Chrome and VS Code
+  // browser share the same session history. Never rely on localStorage alone.
+  useEffect(() => {
+    if (sessionCount > 0 && !historyRef.current && !fetchingRef.current) {
+      fetchingRef.current = true;
+      setHistoryLoading(true);
+      api
+        .getHistory(student.uid)
+        .then((res) => {
+          historyRef.current = res;
+          setHistory(res);
+        })
+        .catch((e) => console.warn("Could not load history on mount", e))
+        .finally(() => {
+          setHistoryLoading(false);
+          fetchingRef.current = false;
+        });
+    }
+  }, [student.uid, sessionCount]);
 
   const handleLogout = () => {
     try {
@@ -369,6 +388,18 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
     }
     onLogout?.();
   };
+
+  const handleLanguageChange = useCallback(
+    async (lang) => {
+      setLanguage(lang);
+      try {
+        await api.setPreference(student.uid, lang);
+      } catch (e) {
+        console.warn("Could not save language preference", e);
+      }
+    },
+    [student.uid],
+  );
 
   const loadHistory = useCallback(async () => {
     // Read from ref — stable across renders, no stale-closure risk
@@ -523,6 +554,21 @@ export default function Sidebar({ student, tab, onTab, onLogout }) {
       )}
 
       <div className={styles.footer}>
+        <div className={styles.langPill}>
+          {[
+            { value: "english", label: "EN" },
+            { value: "hinglish", label: "HI/EN" },
+            { value: "hindi", label: "हिंदी" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              className={`${styles.langPillBtn} ${language === opt.value ? styles.langPillActive : ""}`}
+              onClick={() => handleLanguageChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <div className={styles.footerRow}>
           <ThemeToggle />
           {onLogout && (

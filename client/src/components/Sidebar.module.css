@@ -340,6 +340,46 @@
   padding: 16px 20px 0;
   border-top: 1px solid var(--border);
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Language pill toggle */
+.langPill {
+  display: flex;
+  align-items: center;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 2px;
+  gap: 2px;
+  width: 100%;
+}
+.langPillBtn {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  background: transparent;
+  border-radius: calc(var(--r-pill) - 2px);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background 0.15s,
+    color 0.15s;
+  white-space: nowrap;
+}
+.langPillBtn:hover:not(.langPillActive) {
+  color: var(--text);
+  background: var(--surface);
+}
+.langPillActive {
+  background: var(--accent);
+  color: #fff !important;
 }
 .footerRow {
   display: flex;

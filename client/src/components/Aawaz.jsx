@@ -640,35 +640,35 @@ export default function Aawaz({ student, onReadyForDarpan }) {
         </div>
       </div>
 
-      {/* Stage bar */}
+      {/* Stage bar — 3-column grid: wave | center info | understood */}
       <div className={styles.stage}>
         <div className={styles.stageLeft}>
           <WaveVisualizer bars={waveformBars} state={waveState} />
-          <div className={styles.stageInfo}>
-            <div className={styles.stageNameRow}>
-              <span className={styles.stageName}>Aawaz</span>
-              <button
-                className={`${styles.langToggle} ${language === "english" ? styles.langEn : styles.langHi}`}
-                onClick={toggleLanguage}
-                title={`Switch to ${language === "hinglish" ? "English" : "Hinglish"}`}
-              >
-                <Globe size={10} />
-                {language === "hinglish" ? "HI/EN" : "EN"}
-              </button>
-            </div>
-            <span className={styles.stageStatus}>
-              {waveState === "speaking" && "Speaking..."}
-              {waveState === "listening" && (
-                <span className={styles.listeningRow}>
-                  <span className={styles.listeningDot} />
-                  Listening {fmt(recTime)} -- keep talking
-                </span>
-              )}
-              {waveState === "processing" && "Processing..."}
-              {waveState === "thinking" && "Thinking..."}
-              {waveState === "idle" && "Here"}
-            </span>
+        </div>
+        <div className={styles.stageInfo}>
+          <div className={styles.stageNameRow}>
+            <span className={styles.stageName}>Aawaz</span>
+            <button
+              className={`${styles.langToggle} ${language === "english" ? styles.langEn : styles.langHi}`}
+              onClick={toggleLanguage}
+              title={`Switch to ${language === "hinglish" ? "English" : "Hinglish"}`}
+            >
+              <Globe size={10} />
+              {language === "hinglish" ? "HI/EN" : "EN"}
+            </button>
           </div>
+          <span className={styles.stageStatus}>
+            {waveState === "speaking" && "Speaking..."}
+            {waveState === "listening" && (
+              <span className={styles.listeningRow}>
+                <span className={styles.listeningDot} />
+                Listening {fmt(recTime)} -- keep talking
+              </span>
+            )}
+            {waveState === "processing" && "Processing..."}
+            {waveState === "thinking" && "Thinking..."}
+            {waveState === "idle" && "Here"}
+          </span>
         </div>
         <div className={styles.stageRight}>
           <div className={styles.understandingWrap}>

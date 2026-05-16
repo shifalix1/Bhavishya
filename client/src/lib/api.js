@@ -34,10 +34,14 @@ async function request(method, path, body, retries = 1) {
           status === 400 ||
           status === 409
         ) {
-          throw new Error(err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`);
+          throw new Error(
+            err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`,
+          );
         }
         if (attempt === retries)
-          throw new Error(err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`);
+          throw new Error(
+            err.detail || STATUS_MESSAGES[status] || `HTTP ${status}`,
+          );
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         continue;
       }
@@ -120,4 +124,8 @@ export const api = {
 
   // Session history for sidebar
   getHistory: (uid) => request("GET", `/history/${uid}`, null, 0),
+
+  // Language preference
+  setPreference: (uid, language) =>
+    request("POST", "/preference", { uid, language }, 0),
 };

@@ -7,7 +7,6 @@ import styles from "./Onboard.module.css";
 import { getCached, setCache, clearCache } from "../lib/cache";
 
 const GRADES = [9, 10, 11, 12];
-//const CACHE_KEY = "bhavishya_auth";
 
 export default function Onboard({ onDone }) {
   const [cached, setCached] = useState(() => getCached());
@@ -33,9 +32,16 @@ export default function Onboard({ onDone }) {
     setError("");
     try {
       const res = await api.login(u, p);
-      // language_preference comes from the backend on login; frontend default is english
-      setCache(res);
-      onDone(res);
+      // BUG 4 FIX: backend now returns language_preference; merge with fallback
+      // so returning users always get their stored preference, not the default
+      setCache({
+        ...res,
+        language_preference: res.language_preference || "english",
+      });
+      onDone({
+        ...res,
+        language_preference: res.language_preference || "english",
+      });
     } catch (e) {
       setError(e.message || "Login failed.");
     } finally {
@@ -51,9 +57,9 @@ export default function Onboard({ onDone }) {
     setLoading(true);
     setError("");
     try {
-      const res = await api.register(u, p, n, grade);
+      const res = await api.register(u, p, n, grade, language);
       setCache({ ...res, language_preference: language });
-      onDone(res);
+      onDone({ ...res, language_preference: language });
     } catch (e) {
       setError(e.message || "Registration failed.");
     } finally {

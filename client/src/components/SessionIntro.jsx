@@ -5,15 +5,15 @@ export default function SessionIntro({ student, onChoose }) {
   const [writeText, setWriteText] = useState("");
   const [showWriteInput, setShowWriteInput] = useState(false);
 
-  // Card 1: Talk to Aawaz (voice/chat conversation)
+  // Card 1: Chat with Aawaz (text conversation - mic removed, STT not active)
   // Card 2: Write & paste directly (skip Aawaz, go straight to Darpan)
   // Card 3: Go to Margdarshak (only if has identity)
   // Card 4: What is Bhavishya?
   const cards = [
     {
       id: "aawaz",
-      icon: <MicIcon />,
-      label: "Talk to Aawaz",
+      icon: <ChatIcon />,
+      label: "Chat with Aawaz",
       sub: "Have a real conversation. Aawaz listens, asks questions, then builds your fingerprint.",
       accent: true,
     },
@@ -47,7 +47,7 @@ export default function SessionIntro({ student, onChoose }) {
           className={styles.backBtn}
           onClick={() => setShowWriteInput(false)}
         >
-          ← Back
+          Back
         </button>
         <h2 className={styles.skipHeading}>Write your story</h2>
         <p className={styles.skipSub}>
@@ -137,7 +137,7 @@ export default function SessionIntro({ student, onChoose }) {
   );
 }
 
-function MicIcon() {
+function ChatIcon() {
   return (
     <svg
       width="20"
@@ -149,10 +149,7 @@ function MicIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <line x1="12" y1="19" x2="12" y2="22" />
-      <line x1="8" y1="22" x2="16" y2="22" />
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>
   );
 }

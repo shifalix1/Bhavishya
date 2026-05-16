@@ -20,7 +20,7 @@ export default function WhatIsDarpan({ onBack }) {
           num="01"
           title="Aawaz listens without judging"
           subtitle="Aawaz = Voice"
-          body="Aawaz has a conversation with you — what you enjoy, what bores you, what your family expects, what scares you. There is no right answer. It speaks back in Hindi, English, or Hinglish."
+          body="Aawaz has a conversation with you — what you enjoy, what bores you, what your family expects, what scares you. There is no right answer. It speaks back in Hindi, English, or Hinglish. You can also share an image and Aawaz will read it as part of your story."
         />
         <Block
           num="02"
@@ -48,9 +48,15 @@ export default function WhatIsDarpan({ onBack }) {
         />
         <Block
           num="06"
-          title="Built on Gemma, Google's open model"
-          subtitle="Why Gemma specifically"
-          body="Gemma's multilingual tokenization handles Hinglish natively no separate translation step. Critical for students who think and speak in a mix of Hindi and English, which is most of India."
+          title="Built on Gemma 4, Google's open model"
+          subtitle="Why Gemma specifically — not GPT, not Gemini"
+          body="Three reasons. First, Gemma 4's tokenizer handles Hinglish natively — mixed Hindi-English text is tokenized as one language, not two, so the model reads student input the way a real counsellor would hear it. Second, Gemma 4 is multimodal: when a student shares an image in Aawaz, the same model that runs the conversation also reads the image — no separate vision pipeline. Third, Gemma is open-weights, which makes the local deployment path below possible."
+        />
+        <Block
+          num="07"
+          title="Runs offline on a school laptop"
+          subtitle="Gemma 4 E4B via Ollama — no internet required"
+          body="Set BHAVISHYA_MODE=local and the entire system switches to Gemma 4 E4B running on-device via Ollama. A school in Nagpur or a coaching centre in Patna with no cloud budget can deploy this on a Rs.40,000 laptop and give every student the same experience. This is what 'Good' means in Gemma 4 Good — the model being open is what makes access possible."
         />
       </div>
 
