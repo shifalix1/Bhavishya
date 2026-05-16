@@ -48,11 +48,9 @@ But the architecture is not India-specific. The psychological fingerprinting, th
 
 ## Architecture
 
-```
 
 ![Bhavishya system architecture](client/src/assets/architecture.png)
 
-```
 
 **Memory system** persists across sessions. Each session snapshots the identity fingerprint, conversation transcript, futures generated, and Margdarshak Q&A. A rolling summariser compresses long histories to stay within context limits while preserving longitudinal signal.
 
