@@ -4,7 +4,7 @@
 
 An AI career companion for students in Class 9-12. Not a quiz. Not a list of options. A system that listens to who you actually are, builds a psychological profile from real conversation, and shows you three versions of your life -- grounded in what the job market actually looks like, not what your relatives think it looks like.
 
-**Demo:** `demo_aryan / 1234` or `demo_priya / 1234` at [bhavishya.vercel.app](https://bhavishya.vercel.app)
+**Demo:** `demo_aryan / 1234` or `demo_priya / 1234` at [bhavishya.shifalisingh.in](https://bhavishya.shifalisingh.in/)
 
 ---
 

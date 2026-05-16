@@ -798,6 +798,18 @@ async def set_preference(req: PreferenceRequest, request: Request):
     return {"uid": req.uid, "language_preference": req.language}
 
 
+@app.post("/admin/seed")
+async def run_seed():
+    import os
+
+    os.makedirs("students", exist_ok=True)
+    from seed_demo import seed_aryan, seed_priya
+
+    seed_aryan()
+    seed_priya()
+    return {"status": "seeded", "accounts": ["demo_aryan", "demo_priya"]}
+
+
 # Router registration
 app.include_router(auth_router)
 app.include_router(aawaz_router)
