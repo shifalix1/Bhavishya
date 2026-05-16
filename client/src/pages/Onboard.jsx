@@ -230,7 +230,7 @@ export default function Onboard({ onDone }) {
               </div>
             )}
 
-            <div className={styles.field}>
+            <div className={styles.field} style={{ maxWidth: "160px" }}>
               <label className={styles.label} htmlFor="pin">
                 4-digit PIN
               </label>

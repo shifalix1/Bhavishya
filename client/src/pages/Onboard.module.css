@@ -331,7 +331,6 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  max-width: 160px;
   width: 100%;
 }
 
